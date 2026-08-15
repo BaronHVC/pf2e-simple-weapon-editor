@@ -7,14 +7,18 @@
       <label>{{localize "SWE.Level"}}
         <input type="number" name="level" value="{{data.level}}" min="0" max="30" step="1" />
       </label>
-      <label>{{localize "SWE.PriceGp"}}
-        <input type="number" name="priceGp" value="{{data.priceGp}}" min="0" step="1" />
+      <label title="{{localize 'SWE.TotalPriceHint'}}">{{localize "SWE.PriceGp"}}
+        <input type="number" name="totalGp" value="{{totalGp}}" min="0" step="1" placeholder="auto" />
       </label>
+      {{#if runesGp}}
+      <span class="swe-derived" title="{{localize 'SWE.RunesPriceHint'}}"><i class="fa-solid fa-coins"></i> {{localize "SWE.Runes"}}: {{runesGp}} gp</span>
+      {{/if}}
     </div>
   </header>
 
   <fieldset class="swe-section">
     <legend><i class="fa-solid fa-droplet"></i> {{localize "SWE.Damage"}}</legend>
+
     <div class="swe-row">
       <span class="swe-tag">{{localize "SWE.Base"}}</span>
       <input type="number" name="damage.dice" value="{{data.damage.dice}}" min="1" max="12" step="1" class="swe-narrow" />
@@ -29,27 +33,61 @@
         {{/each}}
       </select>
     </div>
+
+    {{#each extrasIndexed}}
     <div class="swe-row">
-      <label class="swe-check">
-        <input type="checkbox" name="persistent.enabled" {{#if data.persistent.enabled}}checked{{/if}} />
-        {{localize "SWE.Persistent"}}
-      </label>
-      {{#if data.persistent.enabled}}
-      <input type="number" name="persistent.number" value="{{data.persistent.number}}" min="1" max="12" step="1" class="swe-narrow" />
-      <select name="persistent.faces">
-        <option value="" {{#unless data.persistent.faces}}selected{{/unless}}>{{localize "SWE.Flat"}}</option>
-        {{#each dies}}
-        <option value="{{this}}" {{#if (sweEq this ../data.persistent.faces)}}selected{{/if}}>{{this}}</option>
+      <span class="swe-tag">{{localize "SWE.Extra"}}</span>
+      <input type="number" name="extras.{{this.index}}.value" value="{{this.value}}" min="1" max="99" step="1" class="swe-narrow" />
+      <select name="extras.{{this.index}}.die">
+        <option value="" {{#unless this.die}}selected{{/unless}}>{{localize "SWE.Fixed"}}</option>
+        {{#each ../dies}}
+        <option value="{{this}}" {{#if (sweEq this ../this.die)}}selected{{/if}}>{{this}}</option>
         {{/each}}
       </select>
-      <select name="persistent.type">
-        {{#each damageTypes}}
-        <option value="{{this.value}}" {{#if (sweEq this.value ../data.persistent.type)}}selected{{/if}}>{{this.label}}</option>
+      <select name="extras.{{this.index}}.type">
+        {{#each ../damageTypes}}
+        <option value="{{this.value}}" {{#if (sweEq this.value ../this.type)}}selected{{/if}}>{{this.label}}</option>
         {{/each}}
       </select>
-      {{/if}}
+      <input type="text" name="extras.{{this.index}}.src" value="{{this.src}}" placeholder="{{localize 'SWE.SourcePh'}}" class="swe-src" />
+      <a class="swe-rowdel" data-action="sweRemoveDamage" data-index="{{this.index}}" title="{{localize 'SWE.Remove'}}"><i class="fa-solid fa-trash"></i></a>
     </div>
+    {{/each}}
+
+    <div class="swe-row">
+      <button type="button" data-action="sweAddDamage" class="swe-addbtn"><i class="fa-solid fa-plus"></i> {{localize "SWE.AddDamage"}}</button>
+    </div>
+
+    <div class="swe-persistent">
+      <p class="swe-subhead"><i class="fa-solid fa-droplet-slash"></i> {{localize "SWE.Persistent"}}</p>
+      {{#each persIndexed}}
+      <div class="swe-row">
+        <span class="swe-tag">{{localize "SWE.PersTag"}}</span>
+        <input type="number" name="pers.{{this.index}}.value" value="{{this.value}}" min="1" max="99" step="1" class="swe-narrow" />
+        <select name="pers.{{this.index}}.die">
+          <option value="" {{#unless this.die}}selected{{/unless}}>{{localize "SWE.Fixed"}}</option>
+          {{#each ../dies}}
+          <option value="{{this}}" {{#if (sweEq this ../this.die)}}selected{{/if}}>{{this}}</option>
+          {{/each}}
+        </select>
+        <select name="pers.{{this.index}}.type">
+          {{#each ../damageTypes}}
+          <option value="{{this.value}}" {{#if (sweEq this.value ../this.type)}}selected{{/if}}>{{this.label}}</option>
+          {{/each}}
+        </select>
+        <input type="text" name="pers.{{this.index}}.src" value="{{this.src}}" placeholder="{{localize 'SWE.SourcePh'}}" class="swe-src" />
+        <a class="swe-rowdel" data-action="sweRemovePersistent" data-index="{{this.index}}" title="{{localize 'SWE.Remove'}}"><i class="fa-solid fa-trash"></i></a>
+      </div>
+      {{/each}}
+      <div class="swe-row">
+        <button type="button" data-action="sweAddPersistent" class="swe-addbtn"><i class="fa-solid fa-plus"></i> {{localize "SWE.AddPersistent"}}</button>
+      </div>
+    </div>
+
     <p class="swe-preview">{{localize "SWE.Preview"}}: <code>{{preview}}</code></p>
+    {{#if critPreview}}
+    <p class="swe-preview swe-crit"><i class="fa-solid fa-burst"></i> {{localize "SWE.OnCrit"}}: <code>{{critPreview}}</code></p>
+    {{/if}}
   </fieldset>
 
   <fieldset class="swe-section">
@@ -72,7 +110,8 @@
     </div>
     <div class="swe-chiplist">
       {{#each runesResolved}}
-      <span class="swe-chip">{{this.label}}
+      <span class="swe-chip">
+        <a data-action="sweShowRune" data-slug="{{this.slug}}" title="{{localize 'SWE.ShowRune'}}">{{this.label}}</a>
         <a data-action="sweRemoveRune" data-slug="{{this.slug}}" title="{{localize 'SWE.Remove'}}"><i class="fa-solid fa-xmark"></i></a>
       </span>
       {{/each}}
@@ -81,11 +120,21 @@
       <select name="runeToAdd">
         <option value="">{{localize "SWE.PickRune"}}</option>
         {{#each propertyRunes}}
-        <option value="{{this.value}}">{{this.label}}</option>
+        <option value="{{this.value}}" {{#if (sweEq this.value ../selectedRune)}}selected{{/if}}>{{this.label}}</option>
         {{/each}}
       </select>
       <button type="button" data-action="sweAddRune"><i class="fa-solid fa-plus"></i> {{localize "SWE.AddRune"}}</button>
     </div>
+    {{#if runeInfo}}
+    <div class="swe-runeinfo">
+      <p class="swe-runeinfo-head"><i class="fa-solid fa-circle-info"></i> {{runeInfo.label}}{{#if runeInfo.level}} · {{localize "SWE.Level"}} {{runeInfo.level}}{{/if}}{{#if runeInfo.price}} · {{runeInfo.price}} gp{{/if}}</p>
+      {{#if runeInfo.descHTML}}
+      <div class="swe-runeinfo-desc">{{{runeInfo.descHTML}}}</div>
+      {{else}}
+      <p class="swe-muted">{{localize "SWE.NoRuneDesc"}}</p>
+      {{/if}}
+    </div>
+    {{/if}}
     {{#if overLimit}}
     <p class="swe-warning"><i class="fa-solid fa-triangle-exclamation"></i> {{localize "SWE.OverLimit"}} ({{propCount}}/{{potency}})</p>
     <label class="swe-check">

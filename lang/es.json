@@ -29,5 +29,19 @@
   "SWE.Reverted": "Cambios revertidos",
   "SWE.OverLimitBlocked": "Demasiadas runas de propiedad para esa potencia. Activa el modo libre GM para guardar igualmente.",
   "SWE.SettingGmOnly": "Solo GM",
-  "SWE.SettingGmOnlyHint": "Si se desactiva, los jugadores dueños de un arma también pueden abrir el editor."
+  "SWE.SettingGmOnlyHint": "Si se desactiva, los jugadores dueños de un arma también pueden abrir el editor.",
+  "SWE.Extra": "Extra",
+  "SWE.Fixed": "fijo",
+  "SWE.AddDamage": "Añadir daño extra",
+  "SWE.PersistentShort": "persistente",
+  "SWE.AddPersistent": "Añadir daño persistente",
+  "SWE.PersTag": "Pers.",
+  "SWE.ShowRune": "Ver detalles",
+  "SWE.NoRuneDesc": "No se encontró descripción en el compendio para esta runa.",
+  "SWE.SourcePh": "Fuente (ej. runa flaming)",
+  "SWE.OnCrit": "Al crítico",
+  "SWE.DerivedPriceHint": "Valor total calculado por el sistema (precio base + runas). Solo lectura.",
+  "SWE.TotalPriceHint": "Precio total que muestra la ficha. Escribe un valor custom para fijarlo; vacía el campo para volver al precio automático.",
+  "SWE.RunesPriceHint": "Valor aportado por las runas (automático).",
+  "SWE.PriceFloor": "Solo las runas ya valen más que eso; total mínimo"
 }

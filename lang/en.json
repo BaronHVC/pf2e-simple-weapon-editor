@@ -29,5 +29,19 @@
   "SWE.Reverted": "Changes reverted",
   "SWE.OverLimitBlocked": "Too many property runes for that potency. Enable GM free mode to save anyway.",
   "SWE.SettingGmOnly": "GM only",
-  "SWE.SettingGmOnlyHint": "If disabled, players who own a weapon can also open the editor."
+  "SWE.SettingGmOnlyHint": "If disabled, players who own a weapon can also open the editor.",
+  "SWE.Extra": "Extra",
+  "SWE.Fixed": "fixed",
+  "SWE.AddDamage": "Add extra damage",
+  "SWE.PersistentShort": "persistent",
+  "SWE.AddPersistent": "Add persistent damage",
+  "SWE.PersTag": "Pers.",
+  "SWE.ShowRune": "Show details",
+  "SWE.NoRuneDesc": "No description found in the compendium for this rune.",
+  "SWE.SourcePh": "Source (e.g. flaming rune)",
+  "SWE.OnCrit": "On a critical hit",
+  "SWE.DerivedPriceHint": "Total value computed by the system (base price + runes). Read only.",
+  "SWE.TotalPriceHint": "Total price shown on the sheet. Type a custom value to override it; clear the field to go back to the automatic price.",
+  "SWE.RunesPriceHint": "Value contributed by runes (automatic).",
+  "SWE.PriceFloor": "Runes alone are worth more than that; minimum total"
 }
