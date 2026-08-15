@@ -1,0 +1,16 @@
+# Artefactos de release (se suben a GitHub Releases, no al repo)
+*.zip
+
+# Basura del SO
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editores
+.vscode/
+.idea/
+*.swp
+
+# Tooling local
+.code-review-graph/
+node_modules/

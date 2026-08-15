@@ -1,0 +1,134 @@
+.swe-editor .swe-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  overflow-y: auto;
+}
+.swe-editor .swe-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.swe-editor .swe-header img {
+  width: 42px;
+  height: 42px;
+  border: none;
+  border-radius: 6px;
+  object-fit: cover;
+}
+.swe-editor .swe-name {
+  flex: 1;
+  font-size: 1.1em;
+  font-weight: 600;
+}
+.swe-editor .swe-badges {
+  display: flex;
+  gap: 8px;
+}
+.swe-editor .swe-badges label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85em;
+}
+.swe-editor .swe-badges input {
+  width: 60px;
+}
+.swe-editor .swe-section {
+  border: 1px solid var(--color-border, #888);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.swe-editor .swe-section legend {
+  font-weight: 600;
+  padding: 0 6px;
+}
+.swe-editor .swe-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 4px 0;
+}
+.swe-editor .swe-narrow {
+  width: 56px;
+}
+.swe-editor .swe-tag {
+  font-size: 0.75em;
+  opacity: 0.7;
+  min-width: 36px;
+}
+.swe-editor .swe-grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.swe-editor .swe-grid2 label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.85em;
+}
+.swe-editor .swe-chiplist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0;
+  min-height: 22px;
+}
+.swe-editor .swe-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.85em;
+  padding: 2px 9px;
+  border-radius: 10px;
+  background: rgba(80, 100, 180, 0.18);
+  border: 1px solid rgba(80, 100, 180, 0.45);
+}
+.swe-editor .swe-chip a {
+  display: inline-flex;
+  opacity: 0.7;
+}
+.swe-editor .swe-chip a:hover {
+  opacity: 1;
+  text-shadow: none;
+}
+.swe-editor .swe-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.9em;
+}
+.swe-editor .swe-preview {
+  margin: 6px 0 0;
+  font-size: 0.85em;
+  opacity: 0.85;
+}
+.swe-editor .swe-warning {
+  margin: 6px 0 2px;
+  font-size: 0.85em;
+  color: #b3661a;
+}
+.swe-editor .swe-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 2px;
+}
+.swe-editor .swe-footer button {
+  width: auto;
+  padding: 4px 14px;
+}
+.swe-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8em;
+  margin-right: 6px;
+}
+.swe-open span {
+  display: inline;
+}

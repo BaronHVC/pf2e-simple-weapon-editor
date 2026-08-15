@@ -1,0 +1,123 @@
+<div class="swe-body">
+
+  <header class="swe-header">
+    <img src="{{img}}" alt="" />
+    <input type="text" name="name" value="{{data.name}}" class="swe-name" />
+    <div class="swe-badges">
+      <label>{{localize "SWE.Level"}}
+        <input type="number" name="level" value="{{data.level}}" min="0" max="30" step="1" />
+      </label>
+      <label>{{localize "SWE.PriceGp"}}
+        <input type="number" name="priceGp" value="{{data.priceGp}}" min="0" step="1" />
+      </label>
+    </div>
+  </header>
+
+  <fieldset class="swe-section">
+    <legend><i class="fa-solid fa-droplet"></i> {{localize "SWE.Damage"}}</legend>
+    <div class="swe-row">
+      <span class="swe-tag">{{localize "SWE.Base"}}</span>
+      <input type="number" name="damage.dice" value="{{data.damage.dice}}" min="1" max="12" step="1" class="swe-narrow" />
+      <select name="damage.die">
+        {{#each dies}}
+        <option value="{{this}}" {{#if (sweEq this ../data.damage.die)}}selected{{/if}}>{{this}}</option>
+        {{/each}}
+      </select>
+      <select name="damage.damageType">
+        {{#each damageTypes}}
+        <option value="{{this.value}}" {{#if (sweEq this.value ../data.damage.damageType)}}selected{{/if}}>{{this.label}}</option>
+        {{/each}}
+      </select>
+    </div>
+    <div class="swe-row">
+      <label class="swe-check">
+        <input type="checkbox" name="persistent.enabled" {{#if data.persistent.enabled}}checked{{/if}} />
+        {{localize "SWE.Persistent"}}
+      </label>
+      {{#if data.persistent.enabled}}
+      <input type="number" name="persistent.number" value="{{data.persistent.number}}" min="1" max="12" step="1" class="swe-narrow" />
+      <select name="persistent.faces">
+        <option value="" {{#unless data.persistent.faces}}selected{{/unless}}>{{localize "SWE.Flat"}}</option>
+        {{#each dies}}
+        <option value="{{this}}" {{#if (sweEq this ../data.persistent.faces)}}selected{{/if}}>{{this}}</option>
+        {{/each}}
+      </select>
+      <select name="persistent.type">
+        {{#each damageTypes}}
+        <option value="{{this.value}}" {{#if (sweEq this.value ../data.persistent.type)}}selected{{/if}}>{{this.label}}</option>
+        {{/each}}
+      </select>
+      {{/if}}
+    </div>
+    <p class="swe-preview">{{localize "SWE.Preview"}}: <code>{{preview}}</code></p>
+  </fieldset>
+
+  <fieldset class="swe-section">
+    <legend><i class="fa-solid fa-wand-magic-sparkles"></i> {{localize "SWE.Runes"}}</legend>
+    <div class="swe-grid2">
+      <label>{{localize "SWE.Potency"}}
+        <select name="runes.potency">
+          {{#each potencyOptions}}
+          <option value="{{this}}" {{#if (sweEq this ../data.runes.potency)}}selected{{/if}}>{{#if this}}+{{this}}{{else}}—{{/if}}</option>
+          {{/each}}
+        </select>
+      </label>
+      <label>{{localize "SWE.Striking"}}
+        <select name="runes.striking">
+          {{#each strikingOptions}}
+          <option value="{{this.value}}" {{#if (sweEq this.value ../data.runes.striking)}}selected{{/if}}>{{this.label}}</option>
+          {{/each}}
+        </select>
+      </label>
+    </div>
+    <div class="swe-chiplist">
+      {{#each runesResolved}}
+      <span class="swe-chip">{{this.label}}
+        <a data-action="sweRemoveRune" data-slug="{{this.slug}}" title="{{localize 'SWE.Remove'}}"><i class="fa-solid fa-xmark"></i></a>
+      </span>
+      {{/each}}
+    </div>
+    <div class="swe-row">
+      <select name="runeToAdd">
+        <option value="">{{localize "SWE.PickRune"}}</option>
+        {{#each propertyRunes}}
+        <option value="{{this.value}}">{{this.label}}</option>
+        {{/each}}
+      </select>
+      <button type="button" data-action="sweAddRune"><i class="fa-solid fa-plus"></i> {{localize "SWE.AddRune"}}</button>
+    </div>
+    {{#if overLimit}}
+    <p class="swe-warning"><i class="fa-solid fa-triangle-exclamation"></i> {{localize "SWE.OverLimit"}} ({{propCount}}/{{potency}})</p>
+    <label class="swe-check">
+      <input type="checkbox" name="freeMode" {{#if data.freeMode}}checked{{/if}} />
+      {{localize "SWE.FreeMode"}}
+    </label>
+    {{/if}}
+  </fieldset>
+
+  <fieldset class="swe-section">
+    <legend><i class="fa-solid fa-tags"></i> {{localize "SWE.Traits"}}</legend>
+    <div class="swe-chiplist">
+      {{#each traitsResolved}}
+      <span class="swe-chip">{{this.label}}
+        <a data-action="sweRemoveTrait" data-slug="{{this.slug}}" title="{{localize 'SWE.Remove'}}"><i class="fa-solid fa-xmark"></i></a>
+      </span>
+      {{/each}}
+    </div>
+    <div class="swe-row">
+      <select name="traitToAdd">
+        <option value="">{{localize "SWE.PickTrait"}}</option>
+        {{#each weaponTraits}}
+        <option value="{{this.value}}">{{this.label}}</option>
+        {{/each}}
+      </select>
+      <button type="button" data-action="sweAddTrait"><i class="fa-solid fa-plus"></i> {{localize "SWE.AddTrait"}}</button>
+    </div>
+  </fieldset>
+
+  <footer class="swe-footer">
+    <button type="button" data-action="sweRevert"><i class="fa-solid fa-rotate-left"></i> {{localize "SWE.Revert"}}</button>
+    <button type="submit" class="swe-save"><i class="fa-solid fa-floppy-disk"></i> {{localize "SWE.Save"}}</button>
+  </footer>
+
+</div>
