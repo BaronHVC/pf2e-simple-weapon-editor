@@ -265,3 +265,51 @@
   white-space: nowrap;
   align-self: center;
 }
+
+/* Wielder conditions */
+.swe-editor .swe-hint {
+  font-size: 0.85em;
+  opacity: 0.75;
+  margin: 0 0 8px;
+}
+.swe-editor .swe-cond {
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  background: rgba(0, 0, 0, 0.03);
+}
+.swe-editor .swe-cond-when,
+.swe-editor .swe-cond-then {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.swe-editor .swe-cond-when > select,
+.swe-editor .swe-cond-then > select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.swe-editor .swe-cond-when > .swe-cond-target {
+  flex: 2 1 auto;
+}
+.swe-editor .swe-cond-then > input[type="number"] {
+  flex: 0 0 auto;
+}
+.swe-editor .swe-cond-when > a {
+  margin-left: auto;
+  flex: 0 0 auto;
+  cursor: pointer;
+  opacity: 0.6;
+}
+.swe-editor .swe-cond-when > a:hover {
+  opacity: 1;
+}
+.swe-editor .swe-cond-note input[type="text"] {
+  width: 100%;
+}
+.swe-editor .swe-cond .swe-warning {
+  margin: 6px 0 0;
+}

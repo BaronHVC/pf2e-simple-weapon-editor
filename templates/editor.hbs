@@ -164,6 +164,66 @@
     </div>
   </fieldset>
 
+  <fieldset class="swe-section">
+    <legend><i class="fa-solid fa-users"></i> {{localize "SWE.Conditionals"}}</legend>
+    <p class="swe-hint">{{localize "SWE.CondHint"}}</p>
+
+    {{#each condIndexed}}
+    <div class="swe-cond">
+      <div class="swe-cond-when">
+        <span class="swe-tag">{{localize "SWE.CondIf"}}</span>
+        <select name="conds.{{this.index}}.filter">
+          {{#each ../filterOptions}}
+          <option value="{{this.value}}" {{#if (sweEq this.value ../filter)}}selected{{/if}}>{{this.label}}</option>
+          {{/each}}
+        </select>
+        <select name="conds.{{this.index}}.slug" class="swe-cond-target">
+          <option value="">{{localize "SWE.CondPickTarget"}}</option>
+          {{#each this.options}}
+          <option value="{{this.value}}" {{#if (sweEq this.value ../slug)}}selected{{/if}}>{{this.label}}</option>
+          {{/each}}
+        </select>
+        <a data-action="sweRemoveCond" data-index="{{this.index}}" title="{{localize 'SWE.Remove'}}"><i class="fa-solid fa-xmark"></i></a>
+      </div>
+
+      <div class="swe-cond-then">
+        <span class="swe-tag">{{localize "SWE.CondThen"}}</span>
+        <select name="conds.{{this.index}}.effect">
+          {{#each ../effectOptions}}
+          <option value="{{this.value}}" {{#if (sweEq this.value ../effect)}}selected{{/if}}>{{this.label}}</option>
+          {{/each}}
+        </select>
+        <input type="number" name="conds.{{this.index}}.value" value="{{this.value}}" min="1" max="99" step="1" class="swe-narrow" />
+        <select name="conds.{{this.index}}.die">
+          <option value="" {{#unless this.die}}selected{{/unless}}>{{localize "SWE.Fixed"}}</option>
+          {{#each ../dies}}
+          <option value="{{this}}" {{#if (sweEq this ../die)}}selected{{/if}}>{{this}}</option>
+          {{/each}}
+        </select>
+        {{#if this.isDamage}}
+        <select name="conds.{{this.index}}.type">
+          {{#each ../damageTypes}}
+          <option value="{{this.value}}" {{#if (sweEq this.value ../type)}}selected{{/if}}>{{this.label}}</option>
+          {{/each}}
+        </select>
+        {{/if}}
+      </div>
+
+      <div class="swe-cond-note">
+        <input type="text" name="conds.{{this.index}}.src" value="{{this.src}}" placeholder="{{localize 'SWE.SourcePh'}}" />
+      </div>
+
+      {{#if this.unknown}}
+      <p class="swe-warning"><i class="fa-solid fa-triangle-exclamation"></i> {{localize "SWE.CondUnknown"}}: <code>{{this.slug}}</code></p>
+      {{/if}}
+    </div>
+    {{/each}}
+
+    <div class="swe-row">
+      <button type="button" data-action="sweAddCond"><i class="fa-solid fa-plus"></i> {{localize "SWE.AddCond"}}</button>
+    </div>
+  </fieldset>
+
   <footer class="swe-footer">
     <button type="button" data-action="sweRevert"><i class="fa-solid fa-rotate-left"></i> {{localize "SWE.Revert"}}</button>
     <button type="submit" class="swe-save"><i class="fa-solid fa-floppy-disk"></i> {{localize "SWE.Save"}}</button>

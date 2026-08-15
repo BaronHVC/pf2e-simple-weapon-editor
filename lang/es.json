@@ -43,5 +43,21 @@
   "SWE.DerivedPriceHint": "Valor total calculado por el sistema (precio base + runas). Solo lectura.",
   "SWE.TotalPriceHint": "Precio total que muestra la ficha. Escribe un valor custom para fijarlo; vacía el campo para volver al precio automático.",
   "SWE.RunesPriceHint": "Valor aportado por las runas (automático).",
-  "SWE.PriceFloor": "Solo las runas ya valen más que eso; total mínimo"
+  "SWE.PriceFloor": "Solo las runas ya valen más que eso; total mínimo",
+  "SWE.Conditionals": "Condiciones por portador",
+  "SWE.CondHint": "Efectos que solo se aplican según quién lleve el arma.",
+  "SWE.CondIf": "Si",
+  "SWE.CondThen": "entonces",
+  "SWE.CondPickTarget": "Elige una…",
+  "SWE.AddCond": "Añadir condición",
+  "SWE.CondUnknown": "Esta opción no está en ningún compendio instalado, así que nunca va a coincidir",
+  "SWE.CondNoTarget": "No se guardaron las condiciones sin nada seleccionado",
+  "SWE.Filter_ancestry": "la ascendencia de quien la porta es",
+  "SWE.Filter_heritage": "la herencia de quien la porta es",
+  "SWE.Filter_class": "la clase de quien la porta es",
+  "SWE.Effect_damage": "daño extra",
+  "SWE.Effect_healTurn": "curación al inicio del turno",
+  "SWE.Effect_healHit": "curación al golpear",
+  "SWE.HealTurn": "Curación por portar el arma",
+  "SWE.HealHit": "Curación al golpear"
 }

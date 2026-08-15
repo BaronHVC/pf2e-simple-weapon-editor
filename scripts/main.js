@@ -2,6 +2,132 @@ const MODULE_ID = "pf2e-simple-weapon-editor";
 const DIES = ["d4", "d6", "d8", "d10", "d12"];
 const SWE_MARK = "SWE:";
 const SWE_PERS = "SWE:P:";
+const SWE_COND = "SWE:C:";
+
+// Conditionals: "if the wielder is X, then Y".
+const COND_FILTERS = ["ancestry", "heritage", "class"];
+const COND_EFFECTS = ["damage", "healTurn", "healHit"];
+const COND_FLAG = "conditionals";
+const COND_DONE_FLAG = "healed";
+
+// PF2e is not uniform here: ancestry sets `self:ancestry:<slug>`, class sets
+// `class:<slug>` with no `self:` prefix at all, and heritage sets the bare form
+// plus a `self:` alias the system marks as transitional. Matching only one shape
+// silently never fires, so every conditional tests both and the same helper
+// feeds the rule predicates and the runtime fallback.
+function condRollOptions(c) {
+  return [`${c.filter}:${c.slug}`, `self:${c.filter}:${c.slug}`];
+}
+
+function condPredicate(c) {
+  return [{ or: condRollOptions(c) }];
+}
+
+// Rule elements are evaluated by PF2e itself. Our healing hooks are not, so they
+// read the wielder's ancestry/heritage/class directly and only fall back to roll
+// options when the actor does not expose them (NPCs, synthetic actors).
+function actorMatchesCond(actor, c) {
+  if (!actor || !c?.slug || !COND_FILTERS.includes(c.filter)) return false;
+  const direct = {
+    ancestry: actor.ancestry?.slug,
+    heritage: actor.heritage?.slug,
+    class: actor.class?.slug
+  }[c.filter];
+  if (direct) return direct === c.slug;
+  try {
+    const opts = actor.getRollOptions?.() ?? [];
+    return condRollOptions(c).some((o) => opts.includes(o));
+  } catch {
+    return false;
+  }
+}
+
+// Damage and healing carry different payloads; keeping one flat shape meant a
+// healing entry dragged a meaningless damage type around. Discriminate on effect.
+function normalizeCond(c) {
+  const filter = COND_FILTERS.includes(c?.filter) ? c.filter : "ancestry";
+  const effect = COND_EFFECTS.includes(c?.effect) ? c.effect : "damage";
+  const base = {
+    filter,
+    slug: String(c?.slug ?? "").trim(),
+    effect,
+    value: clampInt(c?.value, 1, 99, 1),
+    die: DIES.includes(c?.die) ? c.die : "",
+    src: String(c?.src ?? "").trim()
+  };
+  if (effect === "damage") base.type = String(c?.type ?? "fire");
+  return base;
+}
+
+function condAmount(c) {
+  return c.die ? `${c.value}${c.die}` : `${c.value}`;
+}
+
+// Conditionals live in a module flag, which is the single source of truth. The
+// damage ones are additionally emitted as rule elements so PF2e computes them
+// natively, but those are write-only output: they are regenerated from the flag
+// on every save and never parsed back.
+function readConds(item) {
+  const raw = item?._source?.flags?.[MODULE_ID]?.[COND_FLAG];
+  if (!Array.isArray(raw)) return [];
+  const seen = new Map();
+  for (const entry of raw) {
+    const c = normalizeCond(entry);
+    if (!c.slug) continue;
+    // Identical entries would otherwise be counted twice when healing.
+    seen.set(JSON.stringify(c), c);
+  }
+  return [...seen.values()];
+}
+
+function slugOf(name) {
+  if (typeof name !== "string") return "";
+  return (
+    name.slugify?.({ strict: true }) ??
+    name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+  );
+}
+
+// Scanned from whatever packs the world actually has rather than hardcoded, so
+// homebrew and add-on content (this world also ships Starfinder 2e ancestries)
+// show up on their own. Only ever called while the editor is open.
+let _condChoiceCache = null;
+async function condChoices() {
+  if (_condChoiceCache) return _condChoiceCache;
+  const out = { ancestry: [], heritage: [], class: [] };
+  for (const pack of game.packs ?? []) {
+    if (pack.documentName !== "Item") continue;
+    let index;
+    try {
+      index = await pack.getIndex({ fields: ["system.slug", "type"] });
+    } catch (err) {
+      console.warn(`${MODULE_ID} | cannot index ${pack.collection}`, err);
+      continue;
+    }
+    for (const entry of index) {
+      if (!COND_FILTERS.includes(entry.type)) continue;
+      const slug = entry.system?.slug || slugOf(entry.name);
+      if (!slug) continue;
+      out[entry.type].push({ value: slug, label: entry.name });
+    }
+  }
+  for (const filter of COND_FILTERS) {
+    const seen = new Map();
+    for (const opt of out[filter]) if (!seen.has(opt.value)) seen.set(opt.value, opt);
+    out[filter] = [...seen.values()].sort((a, b) =>
+      a.label.localeCompare(b.label, game.i18n.lang)
+    );
+  }
+  _condChoiceCache = out;
+  return out;
+}
+
+// A weapon can reference an ancestry from a pack that is no longer installed.
+// Surfacing that as "unknown" beats showing a slug and pretending it resolves.
+function condLabel(choices, c) {
+  const hit = (choices?.[c.filter] ?? []).find((o) => o.value === c.slug);
+  return hit ? hit.label : null;
+}
 
 function i18n(key) {
   return game.i18n.localize(`SWE.${key}`);
@@ -184,6 +310,10 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     }
     for (const r of src.rules ?? []) {
       if (!isSweRule(r)) continue;
+      // Must come before the persistent check: SWE:C: also starts with SWE:, so
+      // otherwise a conditional would be read back as plain extra damage and get
+      // duplicated on the next save.
+      if (r.label.startsWith(SWE_COND)) continue;
       const isPers = r.label.startsWith(SWE_PERS);
       const bucket = isPers ? persistents : extras;
       const mark = isPers ? SWE_PERS : SWE_MARK;
@@ -232,6 +362,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         property: [...new Set(src.runes?.property ?? [])]
       },
       traits: [...new Set(src.traits?.value ?? [])],
+      conditionals: readConds(item),
       freeMode: false
     };
   }
@@ -256,6 +387,8 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       sweShowRune: SimpleWeaponEditor.actShowRune,
       sweAddTrait: SimpleWeaponEditor.actAddTrait,
       sweRemoveTrait: SimpleWeaponEditor.actRemoveTrait,
+      sweAddCond: SimpleWeaponEditor.actAddCond,
+      sweRemoveCond: SimpleWeaponEditor.actRemoveCond,
       sweRevert: SimpleWeaponEditor.actRevert
     }
   };
@@ -307,6 +440,19 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       }
     }
     const critPreview = critParts.join(" · ");
+    const choices = await condChoices();
+    const condIndexed = d.conditionals.map((c, i) => {
+      const resolved = condLabel(choices, c);
+      return {
+        ...c,
+        index: i,
+        options: choices[c.filter] ?? [],
+        isDamage: c.effect === "damage",
+        resolved,
+        unknown: !!c.slug && !resolved,
+        amount: condAmount(c)
+      };
+    });
     const derivedGp = Number(this.item.system?.price?.value?.gp ?? 0);
     const baseGp = Number(this.item._source.system?.price?.value?.gp ?? 0);
     const runesGp = Math.max(0, derivedGp - baseGp);
@@ -336,6 +482,15 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         slug,
         label: labelFor(cfg.weaponTraits, slug)
       })),
+      condIndexed,
+      filterOptions: COND_FILTERS.map((f) => ({
+        value: f,
+        label: i18n(`Filter_${f}`)
+      })),
+      effectOptions: COND_EFFECTS.map((e) => ({
+        value: e,
+        label: i18n(`Effect_${e}`)
+      })),
       preview,
       critPreview,
       overLimit,
@@ -353,10 +508,27 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     if (body && this._sweScrollTop) {
       body.scrollTop = this._sweScrollTop;
     }
+    const isCondFilter = (el) => /^conds\.\d+\.filter$/.test(el.name ?? "");
     for (const el of form.querySelectorAll("select, input[type=checkbox], input[type=number]")) {
       if (el.name === "runeToAdd" || el.name === "traitToAdd") continue;
+      if (isCondFilter(el)) continue;
       el.addEventListener("change", () => {
         this.syncFromForm();
+        this.render();
+      });
+    }
+    // Switching ancestry/heritage/class leaves the previously picked target
+    // pointing at a list it no longer belongs to, so clear it on the way through.
+    for (const el of form.querySelectorAll("select")) {
+      if (!isCondFilter(el)) continue;
+      el.addEventListener("change", () => {
+        const idx = Number(el.name.split(".")[1]);
+        this.syncFromForm();
+        const row = this.data.conditionals[idx];
+        if (row) {
+          row.filter = el.value;
+          row.slug = "";
+        }
         this.render();
       });
     }
@@ -409,6 +581,13 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         });
       }
       d.persistents = arr;
+    }
+    if (o.conds) {
+      const arr = [];
+      for (const k of Object.keys(o.conds).sort((a, b) => Number(a) - Number(b))) {
+        arr.push(normalizeCond(o.conds[k] ?? {}));
+      }
+      d.conditionals = arr;
     }
     if (o.runes) {
       if (o.runes.potency !== undefined) d.runes.potency = Number(o.runes.potency) || 0;
@@ -485,6 +664,21 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     this.render();
   }
 
+  static actAddCond(event, target) {
+    this.syncFromForm();
+    this.data.conditionals.push(
+      normalizeCond({ filter: "ancestry", slug: "", effect: "damage", value: 1, die: "d6", type: "fire" })
+    );
+    this.render();
+  }
+
+  static actRemoveCond(event, target) {
+    this.syncFromForm();
+    const idx = Number(target?.dataset?.index);
+    this.data.conditionals = this.data.conditionals.filter((c, i) => i !== idx);
+    this.render();
+  }
+
   static actRevert(event, target) {
     this.data = SimpleWeaponEditor.extract(this.item);
     this.render();
@@ -554,6 +748,29 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         label: mkLabel(SWE_MARK, e, tl)
       };
     });
+    // A row with no target selected would emit a predicate that matches nothing,
+    // so it is dropped rather than saved as a rule that silently never fires.
+    const conds = d.conditionals.filter((c) => c.slug);
+    const incomplete = d.conditionals.length - conds.length;
+    if (incomplete > 0) ui.notifications.warn(`${i18n("CondNoTarget")} (${incomplete})`);
+    // Damage conditionals are mirrored as native rule elements so PF2e computes
+    // them and shows them in the damage breakdown. They are output only: the flag
+    // written below stays the source of truth and extract() never reads them back.
+    const condRules = conds
+      .filter((c) => c.effect === "damage")
+      .map((c) => {
+        const tl = labelFor(cfg.damageTypes, c.type);
+        const auto = `${condAmount(c)} ${tl} · ${c.slug}`;
+        const base = {
+          selector: "{item|id}-damage",
+          damageType: c.type,
+          predicate: condPredicate(c),
+          label: `${SWE_COND} ${c.src || auto}`
+        };
+        return c.die
+          ? { ...base, key: "DamageDice", diceNumber: Number(c.value) || 1, dieSize: c.die }
+          : { ...base, key: "FlatModifier", value: Number(c.value) || 1 };
+      });
     const update = {
       name: d.name || this.item.name,
       "system.level.value": Number(d.level) || 0,
@@ -565,7 +782,8 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       "system.runes.striking": Number(d.runes.striking) || 0,
       "system.runes.property": [...d.runes.property],
       "system.traits.value": [...d.traits],
-      "system.rules": [...keep, ...sweRules, ...persRules]
+      "system.rules": [...keep, ...sweRules, ...persRules, ...condRules],
+      [`flags.${MODULE_ID}.${COND_FLAG}`]: conds
     };
     if (d.totalGp !== undefined) {
       const derivedGp = Number(this.item.system?.price?.value?.gp ?? 0);
@@ -592,6 +810,94 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       console.error(`${MODULE_ID} | save failed`, err);
       ui.notifications.error(`${i18n("SaveFailed")}: ${err.message}`);
     }
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Healing engine                                                             */
+/*                                                                             */
+/*  PF2e has no rule element for "heal when you hit", and FastHealing only     */
+/*  takes a flat number, so healing is applied by the module itself. Hooks fire */
+/*  on every connected client, so every entry point is gated on being the one   */
+/*  active GM: without that guard the healing is multiplied by the number of    */
+/*  people at the table, and non-owning players hit a permission error.         */
+/* -------------------------------------------------------------------------- */
+
+function isSoleExecutor() {
+  return !!game.users?.activeGM && game.users.activeGM === game.user;
+}
+
+function isCarried(item) {
+  const carry = item?.system?.equipped?.carryType;
+  return carry === "held" || carry === "worn";
+}
+
+function healEntriesFor(actor, timing, onlyItemId = null) {
+  const out = [];
+  for (const item of actor?.items ?? []) {
+    if (item.type !== "weapon") continue;
+    if (onlyItemId && item.id !== onlyItemId) continue;
+    if (!isCarried(item)) continue;
+    for (const cond of readConds(item)) {
+      if (cond.effect !== timing) continue;
+      if (!actorMatchesCond(actor, cond)) continue;
+      out.push({ item, cond });
+    }
+  }
+  return out;
+}
+
+// Prefer the system's own application so the result respects max HP, temporary
+// HP and the dying/wounded track. The clamped update is only a fallback.
+async function applyHealing(actor, total) {
+  if (!(total > 0)) return;
+  try {
+    if (typeof actor.applyDamage === "function") {
+      await actor.applyDamage({ damage: -total, skipIWR: true });
+      return;
+    }
+  } catch (err) {
+    console.warn(`${MODULE_ID} | applyDamage failed, using fallback`, err);
+  }
+  const hp = actor.system?.attributes?.hp;
+  if (!hp) return;
+  const next = Math.min(Number(hp.max) || 0, (Number(hp.value) || 0) + total);
+  await actor.update({ "system.attributes.hp.value": next });
+}
+
+async function runHealing(actor, timing, { itemId = null } = {}) {
+  if (!isSoleExecutor()) return;
+  const entries = healEntriesFor(actor, timing, itemId);
+  if (!entries.length) return;
+  let total = 0;
+  const parts = [];
+  for (const { item, cond } of entries) {
+    let amount = Number(cond.value) || 0;
+    if (cond.die) {
+      try {
+        const roll = await new Roll(`${cond.value}${cond.die}`).evaluate();
+        amount = Number(roll.total) || 0;
+      } catch (err) {
+        console.warn(`${MODULE_ID} | healing roll failed`, err);
+        continue;
+      }
+    }
+    if (amount > 0) {
+      total += amount;
+      parts.push(`${item.name}: +${amount}`);
+    }
+  }
+  if (total <= 0) return;
+  try {
+    await applyHealing(actor, total);
+    // One batched message: a weapon with several matching conditionals, or an
+    // actor holding more than one, should not spam the log.
+    await ChatMessage.create({
+      speaker: ChatMessage.getSpeaker({ actor }),
+      content: `<p><strong>${i18n(timing === "healTurn" ? "HealTurn" : "HealHit")}: +${total}</strong></p><p>${parts.join(" · ")}</p>`
+    });
+  } catch (err) {
+    console.error(`${MODULE_ID} | healing failed`, err);
   }
 }
 
@@ -651,4 +957,29 @@ Hooks.on("renderItemSheetPF2e", (app) => injectButton(app));
 Hooks.on("updateItem", (doc) => {
   const app = SimpleWeaponEditor.instances.get(doc.uuid ?? doc.id);
   if (app?.rendered) app.render();
+});
+
+Hooks.on("pf2e.startTurn", (combatant) => {
+  const actor = combatant?.actor;
+  if (actor) runHealing(actor, "healTurn");
+});
+
+// "On hit" deliberately watches the attack roll and not the damage roll: in PF2e
+// damage is a separate button that can be rolled after a miss, so keying off
+// damage would heal on blows that never landed.
+Hooks.on("createChatMessage", async (message) => {
+  if (!isSoleExecutor()) return;
+  const ctx = message?.flags?.pf2e?.context;
+  if (ctx?.type !== "attack-roll") return;
+  if (ctx.outcome !== "success" && ctx.outcome !== "criticalSuccess") return;
+  if (message.getFlag?.(MODULE_ID, COND_DONE_FLAG)) return;
+  const actor = message.actor;
+  const itemId = message.item?.id;
+  if (!actor || !itemId) return;
+  try {
+    await message.setFlag(MODULE_ID, COND_DONE_FLAG, true);
+  } catch (err) {
+    console.warn(`${MODULE_ID} | could not mark message`, err);
+  }
+  await runHealing(actor, "healHit", { itemId });
 });

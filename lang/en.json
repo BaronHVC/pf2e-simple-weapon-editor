@@ -43,5 +43,21 @@
   "SWE.DerivedPriceHint": "Total value computed by the system (base price + runes). Read only.",
   "SWE.TotalPriceHint": "Total price shown on the sheet. Type a custom value to override it; clear the field to go back to the automatic price.",
   "SWE.RunesPriceHint": "Value contributed by runes (automatic).",
-  "SWE.PriceFloor": "Runes alone are worth more than that; minimum total"
+  "SWE.PriceFloor": "Runes alone are worth more than that; minimum total",
+  "SWE.Conditionals": "Wielder conditions",
+  "SWE.CondHint": "Effects that only apply depending on who carries the weapon.",
+  "SWE.CondIf": "If",
+  "SWE.CondThen": "then",
+  "SWE.CondPickTarget": "Pick one…",
+  "SWE.AddCond": "Add condition",
+  "SWE.CondUnknown": "This option is not in any installed compendium, so it will never match",
+  "SWE.CondNoTarget": "Conditions with nothing selected were not saved",
+  "SWE.Filter_ancestry": "the wielder's ancestry is",
+  "SWE.Filter_heritage": "the wielder's heritage is",
+  "SWE.Filter_class": "the wielder's class is",
+  "SWE.Effect_damage": "extra damage",
+  "SWE.Effect_healTurn": "healing at the start of the turn",
+  "SWE.Effect_healHit": "healing on a hit",
+  "SWE.HealTurn": "Healing from carried weapon",
+  "SWE.HealHit": "Healing on hit"
 }
