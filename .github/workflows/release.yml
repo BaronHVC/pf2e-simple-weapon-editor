@@ -82,6 +82,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.v.outputs.tag }}
         run: |
+          # Una etiqueta que no sea vX.Y.Z (por ejemplo v0.6.1-test) se marca
+          # como prerelease. GitHub excluye los prerelease al resolver
+          # "releases/latest", que es justo la URL del manifest: asi una prueba
+          # nunca se le ofrece como actualizacion a los usuarios reales.
+          FLAGS=""
+          if ! echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            FLAGS="--prerelease"
+            echo "::notice::$TAG no es una version estable: se publica como prerelease"
+          fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "El release $TAG ya existe: se reemplazan los archivos"
             gh release upload "$TAG" module.json "$ZIP" --clobber
@@ -89,5 +98,6 @@ jobs:
             gh release create "$TAG" \
               --title "$TAG" \
               --generate-notes \
+              $FLAGS \
               module.json "$ZIP"
           fi
