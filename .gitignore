@@ -14,3 +14,6 @@ desktop.ini
 # Tooling local
 .code-review-graph/
 node_modules/
+
+# Informes de counselors (revisiones de agentes, no son parte del modulo)
+agents/
