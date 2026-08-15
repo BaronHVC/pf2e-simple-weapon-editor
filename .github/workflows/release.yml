@@ -1,0 +1,93 @@
+name: Release
+
+# Se dispara solo cuando publicas una etiqueta tipo v0.7.0
+on:
+  push:
+    tags:
+      - "v*"
+
+# Necesario para que el workflow pueda crear el release
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Leer la version desde la etiqueta
+        id: v
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "Etiqueta: $TAG -> version ${TAG#v}"
+
+      - name: Validar que las fuentes no esten rotas
+        run: |
+          node --check scripts/main.js
+          echo "JS OK    scripts/main.js"
+          for f in module.json lang/en.json lang/es.json; do
+            node -e "JSON.parse(require('fs').readFileSync('$f','utf8'))"
+            echo "JSON OK  $f"
+          done
+
+      - name: Avisar si en.json y es.json se desincronizaron
+        run: |
+          node -e "
+            const fs = require('fs');
+            const load = (p) => Object.keys(JSON.parse(fs.readFileSync(p, 'utf8'))).sort();
+            const en = load('lang/en.json');
+            const es = load('lang/es.json');
+            const faltan = en.filter((k) => !es.includes(k));
+            const sobran = es.filter((k) => !en.includes(k));
+            if (faltan.length) console.log('::warning::Claves sin traducir al espanol: ' + faltan.join(', '));
+            if (sobran.length) console.log('::warning::Claves que sobran en es.json: ' + sobran.join(', '));
+            if (!faltan.length && !sobran.length) console.log('Idiomas a la par: ' + en.length + ' claves');
+          "
+
+      - name: Escribir version y download en module.json
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          node -e "
+            const fs = require('fs');
+            const m = JSON.parse(fs.readFileSync('module.json', 'utf8'));
+            const { VERSION, TAG, GITHUB_REPOSITORY } = process.env;
+            m.version = VERSION;
+            m.download = 'https://github.com/' + GITHUB_REPOSITORY + '/releases/download/' + TAG + '/' + m.id + '-' + TAG + '.zip';
+            fs.writeFileSync('module.json', JSON.stringify(m, null, 2) + '\n');
+            console.log('version  = ' + m.version);
+            console.log('download = ' + m.download);
+          "
+
+      - name: Armar el ZIP
+        env:
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          MODULE_ID=$(node -p "require('./module.json').id")
+          echo "MODULE_ID=$MODULE_ID" >> "$GITHUB_ENV"
+          echo "ZIP=$MODULE_ID-$TAG.zip" >> "$GITHUB_ENV"
+          # Se respeta la carpeta interna que ya usaban tus ZIPs anteriores
+          mkdir -p "build/$MODULE_ID"
+          cp -r module.json scripts styles templates lang "build/$MODULE_ID/"
+          (cd build && zip -r "../$MODULE_ID-$TAG.zip" "$MODULE_ID")
+          echo "--- contenido del ZIP ---"
+          unzip -l "$MODULE_ID-$TAG.zip"
+
+      - name: Publicar el release con sus dos archivos
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "El release $TAG ya existe: se reemplazan los archivos"
+            gh release upload "$TAG" module.json "$ZIP" --clobber
+          else
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --generate-notes \
+              module.json "$ZIP"
+          fi
