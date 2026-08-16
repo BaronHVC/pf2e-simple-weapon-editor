@@ -140,7 +140,10 @@ jobs:
           set +e
           {
           set -x
-          DEV_ZIP="$MODULE_ID-dev.zip"
+          # Ruta absoluta: el zip se arma desde dentro de build/ y gh lo busca
+          # desde la raiz del workspace, asi que una ruta relativa depende de
+          # quien mire y ya fallo una vez con "no matches found".
+          DEV_ZIP="$GITHUB_WORKSPACE/$MODULE_ID-dev.zip"
           node -e "
             const fs = require('fs');
             const m = JSON.parse(fs.readFileSync('module.json', 'utf8'));
@@ -159,7 +162,11 @@ jobs:
             console.log('download = ' + m.download);
           "
           cp module.json "build/$MODULE_ID/module.json"
-          (cd build && zip -qr "../$DEV_ZIP" "$MODULE_ID")
+          rm -f "$DEV_ZIP"
+          (cd build && zip -qr "$DEV_ZIP" "$MODULE_ID")
+          ls -la "$DEV_ZIP"
+          pwd
+          ls -la "$GITHUB_WORKSPACE" | head -20
           NOTES="Canal de pruebas. Los archivos de este release se reemplazan en cada version de prueba, asi la URL de instalacion no cambia. Contenido actual: $TAG (version $VERSION). Para una version concreta, usa su propio release."
           if gh release view dev; then
             echo "El canal ya existe: se reemplazan sus archivos"
