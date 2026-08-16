@@ -163,10 +163,13 @@ jobs:
           "
           cp module.json "build/$MODULE_ID/module.json"
           rm -f "$DEV_ZIP"
-          (cd build && zip -qr "$DEV_ZIP" "$MODULE_ID")
-          ls -la "$DEV_ZIP"
-          pwd
-          ls -la "$GITHUB_WORKSPACE" | head -20
+          # Sin -q, para que zip diga que esta haciendo: la version silenciosa no
+          # creaba el archivo y tampoco se quejaba.
+          echo "--- contenido a empaquetar ---"
+          ls -la build "build/$MODULE_ID"
+          (cd build && zip -r "$DEV_ZIP" "$MODULE_ID")
+          echo "zip_exit=$?"
+          ls -la "$DEV_ZIP" || echo "EL ZIP NO SE CREO"
           NOTES="Canal de pruebas. Los archivos de este release se reemplazan en cada version de prueba, asi la URL de instalacion no cambia. Contenido actual: $TAG (version $VERSION). Para una version concreta, usa su propio release."
           if gh release view dev; then
             echo "El canal ya existe: se reemplazan sus archivos"
