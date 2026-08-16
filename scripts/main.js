@@ -765,6 +765,10 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
           selector: "{item|id}-damage",
           damageType: c.type,
           predicate: condPredicate(c),
+          // Without this PF2e still lists the conditional in the damage panel as a
+          // struck-through toggle when the wielder does not match, which invites
+          // switching on something the condition says should not apply.
+          hideIfDisabled: true,
           label: `${SWE_COND} ${c.src || auto}`
         };
         return c.die
