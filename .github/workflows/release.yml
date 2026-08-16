@@ -22,6 +22,13 @@ jobs:
           TAG="$GITHUB_REF_NAME"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          # Una etiqueta que no sea vX.Y.Z (por ejemplo v0.7.0-rc1) se publica
+          # como prerelease, y eso cambia tambien a donde apunta el manifest.
+          if echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          fi
           echo "Etiqueta: $TAG -> version ${TAG#v}"
 
       - name: Validar que las fuentes no esten rotas
@@ -47,20 +54,31 @@ jobs:
             if (!faltan.length && !sobran.length) console.log('Idiomas a la par: ' + en.length + ' claves');
           "
 
-      - name: Escribir version y download en module.json
+      - name: Escribir version, download y manifest en module.json
         env:
           VERSION: ${{ steps.v.outputs.version }}
           TAG: ${{ steps.v.outputs.tag }}
+          PRERELEASE: ${{ steps.v.outputs.prerelease }}
         run: |
           node -e "
             const fs = require('fs');
             const m = JSON.parse(fs.readFileSync('module.json', 'utf8'));
-            const { VERSION, TAG, GITHUB_REPOSITORY } = process.env;
+            const { VERSION, TAG, PRERELEASE, GITHUB_REPOSITORY } = process.env;
+            const base = 'https://github.com/' + GITHUB_REPOSITORY + '/releases';
             m.version = VERSION;
-            m.download = 'https://github.com/' + GITHUB_REPOSITORY + '/releases/download/' + TAG + '/' + m.id + '-' + TAG + '.zip';
+            m.download = base + '/download/' + TAG + '/' + m.id + '-' + TAG + '.zip';
+            // Stable builds point at 'latest' so Foundry offers updates on its own
+            // and the install URL never has to change. Prereleases are excluded
+            // from 'latest' on purpose, so pointing them there would make Foundry
+            // resolve a test build straight back to the last stable one.
+            m.manifest =
+              PRERELEASE === 'true'
+                ? base + '/download/' + TAG + '/module.json'
+                : base + '/latest/download/module.json';
             fs.writeFileSync('module.json', JSON.stringify(m, null, 2) + '\n');
             console.log('version  = ' + m.version);
             console.log('download = ' + m.download);
+            console.log('manifest = ' + m.manifest);
           "
 
       - name: Armar el ZIP
@@ -81,13 +99,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.v.outputs.tag }}
+          PRERELEASE: ${{ steps.v.outputs.prerelease }}
         run: |
-          # Una etiqueta que no sea vX.Y.Z (por ejemplo v0.6.1-test) se marca
-          # como prerelease. GitHub excluye los prerelease al resolver
-          # "releases/latest", que es justo la URL del manifest: asi una prueba
-          # nunca se le ofrece como actualizacion a los usuarios reales.
+          # GitHub excluye los prerelease al resolver "releases/latest", que es la
+          # URL de actualizacion de las versiones estables: asi una prueba nunca se
+          # le ofrece como actualizacion a los usuarios reales.
           FLAGS=""
-          if ! echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+          if [ "$PRERELEASE" = "true" ]; then
             FLAGS="--prerelease"
             echo "::notice::$TAG no es una version estable: se publica como prerelease"
           fi
