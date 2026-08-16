@@ -307,8 +307,34 @@
 .swe-editor .swe-cond-when > a:hover {
   opacity: 1;
 }
+.swe-editor .swe-cond-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .swe-editor .swe-cond-note input[type="text"] {
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.swe-editor .swe-cond-note > a {
+  flex: 0 0 auto;
+  cursor: pointer;
+  opacity: 0.6;
+}
+.swe-editor .swe-cond-note > a:hover {
+  opacity: 1;
+}
+.swe-editor .swe-cond-more {
+  margin: 2px 0 6px;
+  font-size: 0.85em;
+}
+.swe-editor .swe-cond-more a {
+  cursor: pointer;
+  opacity: 0.8;
+}
+.swe-editor .swe-cond-more a:hover {
+  opacity: 1;
+  text-decoration: underline;
 }
 .swe-editor .swe-cond .swe-warning {
   margin: 6px 0 0;

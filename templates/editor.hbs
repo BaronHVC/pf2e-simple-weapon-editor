@@ -170,20 +170,29 @@
 
     {{#each condIndexed}}
     <div class="swe-cond">
+      {{#each this.criteria}}
       <div class="swe-cond-when">
-        <span class="swe-tag">{{localize "SWE.CondIf"}}</span>
-        <select name="conds.{{this.index}}.filter">
-          {{#each ../filterOptions}}
+        <span class="swe-tag">{{#if this.first}}{{localize "SWE.CondIf"}}{{else}}{{localize "SWE.CondAnd"}}{{/if}}</span>
+        <select name="conds.{{this.condIndex}}.criteria.{{this.index}}.filter">
+          {{#each ../../filterOptions}}
           <option value="{{this.value}}" {{#if (sweEq this.value ../filter)}}selected{{/if}}>{{this.label}}</option>
           {{/each}}
         </select>
-        <select name="conds.{{this.index}}.slug" class="swe-cond-target">
+        <select name="conds.{{this.condIndex}}.criteria.{{this.index}}.slug" class="swe-cond-target">
           <option value="">{{localize "SWE.CondPickTarget"}}</option>
           {{#each this.options}}
           <option value="{{this.value}}" {{#if (sweEq this.value ../slug)}}selected{{/if}}>{{this.label}}</option>
           {{/each}}
         </select>
-        <a data-action="sweRemoveCond" data-index="{{this.index}}" title="{{localize 'SWE.Remove'}}"><i class="fa-solid fa-xmark"></i></a>
+        <a data-action="sweRemoveCrit" data-cond="{{this.condIndex}}" data-index="{{this.index}}" title="{{localize 'SWE.Remove'}}"><i class="fa-solid fa-xmark"></i></a>
+      </div>
+      {{#if this.unknown}}
+      <p class="swe-warning"><i class="fa-solid fa-triangle-exclamation"></i> {{localize "SWE.CondUnknown"}}: <code>{{this.slug}}</code></p>
+      {{/if}}
+      {{/each}}
+
+      <div class="swe-cond-more">
+        <a data-action="sweAddCrit" data-cond="{{this.index}}"><i class="fa-solid fa-plus"></i> {{localize "SWE.AddCriterion"}}</a>
       </div>
 
       <div class="swe-cond-then">
@@ -211,11 +220,8 @@
 
       <div class="swe-cond-note">
         <input type="text" name="conds.{{this.index}}.src" value="{{this.src}}" placeholder="{{localize 'SWE.SourcePh'}}" />
+        <a data-action="sweRemoveCond" data-index="{{this.index}}" title="{{localize 'SWE.RemoveCond'}}"><i class="fa-solid fa-trash"></i></a>
       </div>
-
-      {{#if this.unknown}}
-      <p class="swe-warning"><i class="fa-solid fa-triangle-exclamation"></i> {{localize "SWE.CondUnknown"}}: <code>{{this.slug}}</code></p>
-      {{/if}}
     </div>
     {{/each}}
 

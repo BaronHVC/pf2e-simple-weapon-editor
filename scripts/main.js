@@ -10,7 +10,7 @@ const SWE_COND = "SWE:C:";
 const SWE_COND_SLUG = "swe-cond";
 
 // Conditionals: "if the wielder is X, then Y".
-const COND_FILTERS = ["ancestry", "heritage", "class"];
+const COND_FILTERS = ["ancestry", "heritage", "class", "feat"];
 const COND_EFFECTS = ["damage", "healTurn", "healHit"];
 const COND_FLAG = "conditionals";
 const COND_DONE_FLAG = "healed";
@@ -20,41 +20,70 @@ const COND_DONE_FLAG = "healed";
 // plus a `self:` alias the system marks as transitional. Matching only one shape
 // silently never fires, so every conditional tests both and the same helper
 // feeds the rule predicates and the runtime fallback.
-function condRollOptions(c) {
-  return [`${c.filter}:${c.slug}`, `self:${c.filter}:${c.slug}`];
+function critRollOptions(crit) {
+  // A feat and a feature are both stored as feat items but announce themselves
+  // under different prefixes, so a criterion pointing at either has to test both.
+  const bases = crit.filter === "feat" ? ["feat", "feature"] : [crit.filter];
+  return bases.flatMap((b) => [`${b}:${crit.slug}`, `self:${b}:${crit.slug}`]);
 }
 
+// Entries of a PF2e predicate are ANDed, so one {or:[...]} per criterion reads
+// as "every criterion holds, each in whichever shape the system happens to use".
 function condPredicate(c) {
-  return [{ or: condRollOptions(c) }];
+  return c.criteria.map((crit) => ({ or: critRollOptions(crit) }));
 }
 
 // Rule elements are evaluated by PF2e itself. Our healing hooks are not, so they
 // read the wielder's ancestry/heritage/class directly and only fall back to roll
 // options when the actor does not expose them (NPCs, synthetic actors).
-function actorMatchesCond(actor, c) {
-  if (!actor || !c?.slug || !COND_FILTERS.includes(c.filter)) return false;
-  const direct = {
-    ancestry: actor.ancestry?.slug,
-    heritage: actor.heritage?.slug,
-    class: actor.class?.slug
-  }[c.filter];
-  if (direct) return direct === c.slug;
+function actorMatchesCrit(actor, crit) {
+  if (!actor || !crit?.slug || !COND_FILTERS.includes(crit.filter)) return false;
+  if (crit.filter === "feat") {
+    const feats = actor.itemTypes?.feat ?? [];
+    if (feats.some((f) => (f.slug || slugOf(f.name)) === crit.slug)) return true;
+  } else {
+    const direct = {
+      ancestry: actor.ancestry?.slug,
+      heritage: actor.heritage?.slug,
+      class: actor.class?.slug
+    }[crit.filter];
+    if (direct) return direct === crit.slug;
+  }
   try {
     const opts = actor.getRollOptions?.() ?? [];
-    return condRollOptions(c).some((o) => opts.includes(o));
+    return critRollOptions(crit).some((o) => opts.includes(o));
   } catch {
     return false;
   }
 }
 
+// Several criteria on one conditional are an AND, matching the predicate the
+// rule elements get so both paths agree on what "this applies" means.
+function actorMatchesCond(actor, c) {
+  const crits = c?.criteria ?? [];
+  if (!crits.length) return false;
+  return crits.every((crit) => actorMatchesCrit(actor, crit));
+}
+
 // Damage and healing carry different payloads; keeping one flat shape meant a
 // healing entry dragged a meaningless damage type around. Discriminate on effect.
+function normalizeCrit(crit) {
+  return {
+    filter: COND_FILTERS.includes(crit?.filter) ? crit.filter : "ancestry",
+    slug: String(crit?.slug ?? "").trim()
+  };
+}
+
 function normalizeCond(c) {
-  const filter = COND_FILTERS.includes(c?.filter) ? c.filter : "ancestry";
   const effect = COND_EFFECTS.includes(c?.effect) ? c.effect : "damage";
+  // Conditionals used to carry a single filter/slug pair directly; anything
+  // saved back then is read as a one-criterion conditional.
+  const rawCrits =
+    Array.isArray(c?.criteria) && c.criteria.length
+      ? c.criteria
+      : [{ filter: c?.filter, slug: c?.slug }];
   const base = {
-    filter,
-    slug: String(c?.slug ?? "").trim(),
+    criteria: rawCrits.map(normalizeCrit),
     effect,
     value: clampInt(c?.value, 1, 99, 1),
     die: DIES.includes(c?.die) ? c.die : "",
@@ -78,7 +107,10 @@ function readConds(item) {
   const seen = new Map();
   for (const entry of raw) {
     const c = normalizeCond(entry);
-    if (!c.slug) continue;
+    // A criterion with nothing selected would match nothing and, being ANDed,
+    // would disable the whole conditional.
+    c.criteria = c.criteria.filter((crit) => crit.slug);
+    if (!c.criteria.length) continue;
     // Identical entries would otherwise be counted twice when healing.
     seen.set(JSON.stringify(c), c);
   }
@@ -99,7 +131,9 @@ function slugOf(name) {
 let _condChoiceCache = null;
 async function condChoices() {
   if (_condChoiceCache) return _condChoiceCache;
-  const out = { ancestry: [], heritage: [], class: [] };
+  // Feats and features are both stored as items of type "feat", so ancestry
+  // feats, class feats and ancestry features all land in the same bucket.
+  const out = { ancestry: [], heritage: [], class: [], feat: [] };
   for (const pack of game.packs ?? []) {
     if (pack.documentName !== "Item") continue;
     let index;
@@ -129,8 +163,8 @@ async function condChoices() {
 
 // A weapon can reference an ancestry from a pack that is no longer installed.
 // Surfacing that as "unknown" beats showing a slug and pretending it resolves.
-function condLabel(choices, c) {
-  const hit = (choices?.[c.filter] ?? []).find((o) => o.value === c.slug);
+function condLabel(choices, crit) {
+  const hit = (choices?.[crit.filter] ?? []).find((o) => o.value === crit.slug);
   return hit ? hit.label : null;
 }
 
@@ -400,6 +434,8 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       sweRemoveTrait: SimpleWeaponEditor.actRemoveTrait,
       sweAddCond: SimpleWeaponEditor.actAddCond,
       sweRemoveCond: SimpleWeaponEditor.actRemoveCond,
+      sweAddCrit: SimpleWeaponEditor.actAddCrit,
+      sweRemoveCrit: SimpleWeaponEditor.actRemoveCrit,
       sweRevert: SimpleWeaponEditor.actRevert
     }
   };
@@ -452,18 +488,25 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     }
     const critPreview = critParts.join(" · ");
     const choices = await condChoices();
-    const condIndexed = d.conditionals.map((c, i) => {
-      const resolved = condLabel(choices, c);
-      return {
-        ...c,
-        index: i,
-        options: choices[c.filter] ?? [],
-        isDamage: c.effect === "damage",
-        resolved,
-        unknown: !!c.slug && !resolved,
-        amount: condAmount(c)
-      };
-    });
+    const condIndexed = d.conditionals.map((c, i) => ({
+      ...c,
+      index: i,
+      isDamage: c.effect === "damage",
+      amount: condAmount(c),
+      onlyOneCrit: c.criteria.length <= 1,
+      criteria: c.criteria.map((crit, j) => {
+        const resolved = condLabel(choices, crit);
+        return {
+          ...crit,
+          index: j,
+          condIndex: i,
+          first: j === 0,
+          options: choices[crit.filter] ?? [],
+          resolved,
+          unknown: !!crit.slug && !resolved
+        };
+      })
+    }));
     const derivedGp = Number(this.item.system?.price?.value?.gp ?? 0);
     const baseGp = Number(this.item._source.system?.price?.value?.gp ?? 0);
     const runesGp = Math.max(0, derivedGp - baseGp);
@@ -519,7 +562,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     if (body && this._sweScrollTop) {
       body.scrollTop = this._sweScrollTop;
     }
-    const isCondFilter = (el) => /^conds\.\d+\.filter$/.test(el.name ?? "");
+    const isCondFilter = (el) => /^conds\.\d+\.criteria\.\d+\.filter$/.test(el.name ?? "");
     for (const el of form.querySelectorAll("select, input[type=checkbox], input[type=number]")) {
       if (el.name === "runeToAdd" || el.name === "traitToAdd") continue;
       if (isCondFilter(el)) continue;
@@ -533,12 +576,12 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     for (const el of form.querySelectorAll("select")) {
       if (!isCondFilter(el)) continue;
       el.addEventListener("change", () => {
-        const idx = Number(el.name.split(".")[1]);
+        const [, ci, , j] = el.name.split(".");
         this.syncFromForm();
-        const row = this.data.conditionals[idx];
-        if (row) {
-          row.filter = el.value;
-          row.slug = "";
+        const crit = this.data.conditionals[Number(ci)]?.criteria?.[Number(j)];
+        if (crit) {
+          crit.filter = el.value;
+          crit.slug = "";
         }
         this.render();
       });
@@ -594,9 +637,16 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       d.persistents = arr;
     }
     if (o.conds) {
+      const byIndex = (a, b) => Number(a) - Number(b);
       const arr = [];
-      for (const k of Object.keys(o.conds).sort((a, b) => Number(a) - Number(b))) {
-        arr.push(normalizeCond(o.conds[k] ?? {}));
+      for (const k of Object.keys(o.conds).sort(byIndex)) {
+        const raw = o.conds[k] ?? {};
+        const criteria = raw.criteria
+          ? Object.keys(raw.criteria)
+              .sort(byIndex)
+              .map((ck) => raw.criteria[ck] ?? {})
+          : [];
+        arr.push(normalizeCond({ ...raw, criteria }));
       }
       d.conditionals = arr;
     }
@@ -678,7 +728,13 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
   static actAddCond(event, target) {
     this.syncFromForm();
     this.data.conditionals.push(
-      normalizeCond({ filter: "ancestry", slug: "", effect: "damage", value: 1, die: "d6", type: "fire" })
+      normalizeCond({
+        criteria: [{ filter: "ancestry", slug: "" }],
+        effect: "damage",
+        value: 1,
+        die: "d6",
+        type: "fire"
+      })
     );
     this.render();
   }
@@ -687,6 +743,29 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     this.syncFromForm();
     const idx = Number(target?.dataset?.index);
     this.data.conditionals = this.data.conditionals.filter((c, i) => i !== idx);
+    this.render();
+  }
+
+  static actAddCrit(event, target) {
+    this.syncFromForm();
+    const ci = Number(target?.dataset?.cond);
+    this.data.conditionals[ci]?.criteria.push({ filter: "ancestry", slug: "" });
+    this.render();
+  }
+
+  static actRemoveCrit(event, target) {
+    this.syncFromForm();
+    const ci = Number(target?.dataset?.cond);
+    const idx = Number(target?.dataset?.index);
+    const cond = this.data.conditionals[ci];
+    // A conditional with no criteria left would apply to everyone, which is the
+    // opposite of what it is for; removing the last one deletes the row instead.
+    if (!cond) return;
+    if (cond.criteria.length <= 1) {
+      this.data.conditionals = this.data.conditionals.filter((c, i) => i !== ci);
+    } else {
+      cond.criteria = cond.criteria.filter((c, j) => j !== idx);
+    }
     this.render();
   }
 
@@ -759,10 +838,16 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         label: mkLabel(SWE_MARK, e, tl)
       };
     });
-    // A row with no target selected would emit a predicate that matches nothing,
-    // so it is dropped rather than saved as a rule that silently never fires.
-    const conds = d.conditionals.filter((c) => c.slug);
-    const incomplete = d.conditionals.length - conds.length;
+    // A criterion with no target selected would emit a predicate that matches
+    // nothing, and criteria are ANDed, so it would silently disable its whole
+    // conditional. Drop the empties and say how many rather than save a rule
+    // that never fires.
+    const conds = d.conditionals
+      .map((c) => ({ ...c, criteria: c.criteria.filter((crit) => crit.slug) }))
+      .filter((c) => c.criteria.length);
+    const droppedCrits =
+      d.conditionals.reduce((n, c) => n + c.criteria.filter((x) => !x.slug).length, 0);
+    const incomplete = d.conditionals.length - conds.length + droppedCrits;
     if (incomplete > 0) ui.notifications.warn(`${i18n("CondNoTarget")} (${incomplete})`);
     // Damage conditionals are mirrored as native rule elements so PF2e computes
     // them and shows them in the damage breakdown. They are output only: the flag
@@ -771,7 +856,8 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       .filter((c) => c.effect === "damage")
       .map((c, i) => {
         const tl = labelFor(cfg.damageTypes, c.type);
-        const auto = `${condAmount(c)} ${tl} · ${c.slug}`;
+        const who = c.criteria.map((crit) => crit.slug).join(" + ");
+        const auto = `${condAmount(c)} ${tl} · ${who}`;
         const base = {
           slug: `${SWE_COND_SLUG}-${i}`,
           selector: "{item|id}-damage",
