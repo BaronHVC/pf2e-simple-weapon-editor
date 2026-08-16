@@ -162,14 +162,33 @@ jobs:
             console.log('download = ' + m.download);
           "
           cp module.json "build/$MODULE_ID/module.json"
-          rm -f "$DEV_ZIP"
-          # Sin -q, para que zip diga que esta haciendo: la version silenciosa no
-          # creaba el archivo y tampoco se quejaba.
-          echo "--- contenido a empaquetar ---"
-          ls -la build "build/$MODULE_ID"
-          (cd build && zip -r "$DEV_ZIP" "$MODULE_ID")
-          echo "zip_exit=$?"
-          ls -la "$DEV_ZIP" || echo "EL ZIP NO SE CREO"
+          rm -f "$DEV_ZIP" "$GITHUB_WORKSPACE"/probe*.zip
+          # zip venia comprimiendo los archivos correctamente y saliendo con 0,
+          # pero dejando el resultado en otro lado, asi que la forma exacta de
+          # invocarlo importa. En vez de apostar a una, se prueban las dos que
+          # producen la estructura interna correcta y se usa la que exista.
+          echo "--- zip disponible ---"
+          which zip; zip -v 2>&1 | head -2
+          echo "--- A: relativa desde build (la forma que usa el paso que funciona) ---"
+          (cd build && zip -r "../probeA.zip" "$MODULE_ID"); echo "exitA=$?"
+          echo "--- B: absoluta desde build (la que venia fallando) ---"
+          (cd build && zip -r "$GITHUB_WORKSPACE/probeB.zip" "$MODULE_ID"); echo "exitB=$?"
+          echo "--- que quedo en disco ---"
+          ls -la "$GITHUB_WORKSPACE"/probe*.zip 2>&1
+          for cand in probeA.zip probeB.zip; do
+            if [ -s "$GITHUB_WORKSPACE/$cand" ]; then
+              echo "se usa la variante $cand"
+              mv "$GITHUB_WORKSPACE/$cand" "$DEV_ZIP"
+              break
+            fi
+          done
+          rm -f "$GITHUB_WORKSPACE"/probe*.zip
+          if [ -s "$DEV_ZIP" ]; then
+            echo "--- estructura interna del paquete elegido ---"
+            unzip -l "$DEV_ZIP"
+          else
+            echo "NINGUNA VARIANTE PRODUJO ARCHIVO"
+          fi
           NOTES="Canal de pruebas. Los archivos de este release se reemplazan en cada version de prueba, asi la URL de instalacion no cambia. Contenido actual: $TAG (version $VERSION). Para una version concreta, usa su propio release."
           if gh release view dev; then
             echo "El canal ya existe: se reemplazan sus archivos"
