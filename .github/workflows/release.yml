@@ -134,6 +134,12 @@ jobs:
           TAG: ${{ steps.v.outputs.tag }}
           VERSION: ${{ steps.v.outputs.version }}
         run: |
+          # El log del workflow solo lo puede descargar quien tenga permisos de
+          # admin en el repo. Este paso guarda su propia salida y la adjunta al
+          # release para poder diagnosticarlo desde afuera.
+          set +e
+          {
+          set -x
           DEV_ZIP="$MODULE_ID-dev.zip"
           node -e "
             const fs = require('fs');
@@ -155,7 +161,7 @@ jobs:
           cp module.json "build/$MODULE_ID/module.json"
           (cd build && zip -qr "../$DEV_ZIP" "$MODULE_ID")
           NOTES="Canal de pruebas. Los archivos de este release se reemplazan en cada version de prueba, asi la URL de instalacion no cambia. Contenido actual: $TAG (version $VERSION). Para una version concreta, usa su propio release."
-          if gh release view dev >/dev/null 2>&1; then
+          if gh release view dev; then
             echo "El canal ya existe: se reemplazan sus archivos"
             gh release upload dev module.json "$DEV_ZIP" --clobber
             gh release edit dev --notes "$NOTES"
@@ -171,6 +177,11 @@ jobs:
               --prerelease \
               module.json "$DEV_ZIP"
           fi
-          echo "Canal actualizado:"
-          gh release view dev --json tagName,name,isPrerelease,assets \
+          echo "Estado final del canal:"
+          gh release view dev --json tagName,isPrerelease,assets \
             --jq '{tag: .tagName, prerelease: .isPrerelease, assets: [.assets[].name]}'
+          } > dev-channel.log 2>&1
+          RC=$?
+          echo "exit_code=$RC" >> dev-channel.log
+          cat dev-channel.log
+          gh release upload "$TAG" dev-channel.log --clobber || true
