@@ -3,6 +3,11 @@ const DIES = ["d4", "d6", "d8", "d10", "d12"];
 const SWE_MARK = "SWE:";
 const SWE_PERS = "SWE:P:";
 const SWE_COND = "SWE:C:";
+// Conditional rules are marked by slug rather than by a label prefix, so the
+// label can stay clean in the damage panel. Their data lives in the flag, so
+// nothing is lost by not encoding it in the label. SWE_COND is still recognised
+// when reading, for weapons saved before this change.
+const SWE_COND_SLUG = "swe-cond";
 
 // Conditionals: "if the wielder is X, then Y".
 const COND_FILTERS = ["ancestry", "heritage", "class"];
@@ -183,7 +188,13 @@ function clampInt(v, min, max, fallback) {
   return Math.min(max, Math.max(min, Math.trunc(n)));
 }
 
+function isCondRule(r) {
+  if (typeof r?.slug === "string" && r.slug.startsWith(SWE_COND_SLUG)) return true;
+  return typeof r?.label === "string" && r.label.startsWith(SWE_COND);
+}
+
 function isSweRule(r) {
+  if (isCondRule(r)) return true;
   return typeof r?.label === "string" && r.label.startsWith(SWE_MARK);
 }
 
@@ -310,10 +321,10 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     }
     for (const r of src.rules ?? []) {
       if (!isSweRule(r)) continue;
-      // Must come before the persistent check: SWE:C: also starts with SWE:, so
-      // otherwise a conditional would be read back as plain extra damage and get
-      // duplicated on the next save.
-      if (r.label.startsWith(SWE_COND)) continue;
+      // Must come before the persistent check, or a conditional would be read
+      // back as plain extra damage and duplicated on the next save. Conditionals
+      // are rebuilt from the flag, never from these rules.
+      if (isCondRule(r)) continue;
       const isPers = r.label.startsWith(SWE_PERS);
       const bucket = isPers ? persistents : extras;
       const mark = isPers ? SWE_PERS : SWE_MARK;
@@ -758,10 +769,11 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     // written below stays the source of truth and extract() never reads them back.
     const condRules = conds
       .filter((c) => c.effect === "damage")
-      .map((c) => {
+      .map((c, i) => {
         const tl = labelFor(cfg.damageTypes, c.type);
         const auto = `${condAmount(c)} ${tl} · ${c.slug}`;
         const base = {
+          slug: `${SWE_COND_SLUG}-${i}`,
           selector: "{item|id}-damage",
           damageType: c.type,
           predicate: condPredicate(c),
@@ -769,7 +781,9 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
           // struck-through toggle when the wielder does not match, which invites
           // switching on something the condition says should not apply.
           hideIfDisabled: true,
-          label: `${SWE_COND} ${c.src || auto}`
+          // No marker prefix here: the slug above identifies the rule, so what the
+          // player sees in the damage breakdown is just the effect.
+          label: c.src || auto
         };
         return c.die
           ? { ...base, key: "DamageDice", diceNumber: Number(c.value) || 1, dieSize: c.die }
