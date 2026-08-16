@@ -119,3 +119,45 @@ jobs:
               $FLAGS \
               module.json "$ZIP"
           fi
+
+      # Canal de pruebas: una etiqueta fija cuyos archivos se reemplazan en cada
+      # prerelease, para instalar siempre desde la misma URL. El release por
+      # version sigue existiendo aparte, para poder volver a una rc concreta.
+      - name: Actualizar el canal de pruebas
+        if: steps.v.outputs.prerelease == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.v.outputs.tag }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          DEV_ZIP="$MODULE_ID-dev.zip"
+          node -e "
+            const fs = require('fs');
+            const m = JSON.parse(fs.readFileSync('module.json', 'utf8'));
+            const { GITHUB_REPOSITORY, GITHUB_RUN_NUMBER, VERSION } = process.env;
+            const dev = 'https://github.com/' + GITHUB_REPOSITORY + '/releases/download/dev/';
+            // Foundry compares versions segment by segment and falls back to a
+            // string compare on anything non-numeric, so '0.7.0-rc10' reads as
+            // older than '0.7.0-rc9' and the update stops being offered. The test
+            // channel therefore reports a plain numeric build that always grows.
+            m.version = VERSION.replace(/[-+].*\$/, '') + '.' + GITHUB_RUN_NUMBER;
+            m.manifest = dev + 'module.json';
+            m.download = dev + m.id + '-dev.zip';
+            fs.writeFileSync('module.json', JSON.stringify(m, null, 2) + '\n');
+            console.log('version  = ' + m.version);
+            console.log('manifest = ' + m.manifest);
+            console.log('download = ' + m.download);
+          "
+          cp module.json "build/$MODULE_ID/module.json"
+          (cd build && zip -qr "../$DEV_ZIP" "$MODULE_ID")
+          NOTES="Canal de pruebas. Los archivos de este release se reemplazan en cada version de prueba, asi la URL de instalacion no cambia. Contenido actual: $TAG (version $VERSION). Para una version concreta, usa su propio release."
+          if gh release view dev >/dev/null 2>&1; then
+            gh release upload dev module.json "$DEV_ZIP" --clobber
+            gh release edit dev --notes "$NOTES"
+          else
+            gh release create dev \
+              --title "Canal de pruebas" \
+              --notes "$NOTES" \
+              --prerelease \
+              module.json "$DEV_ZIP"
+          fi
