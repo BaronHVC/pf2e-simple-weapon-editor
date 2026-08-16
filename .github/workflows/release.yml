@@ -87,7 +87,11 @@ jobs:
         run: |
           MODULE_ID=$(node -p "require('./module.json').id")
           echo "MODULE_ID=$MODULE_ID" >> "$GITHUB_ENV"
-          echo "ZIP=$MODULE_ID-$TAG.zip" >> "$GITHUB_ENV"
+          # No llamar a esta variable ZIP: Info-ZIP lee $ZIP como argumentos por
+          # defecto, asi que exportarla hace que toda llamada posterior a zip
+          # reciba este nombre como archivo destino y trate el suyo como patron
+          # de entrada, escribiendo en el paquete equivocado sin dar error.
+          echo "ZIP_NAME=$MODULE_ID-$TAG.zip" >> "$GITHUB_ENV"
           # Se respeta la carpeta interna que ya usaban tus ZIPs anteriores
           mkdir -p "build/$MODULE_ID"
           cp -r module.json scripts styles templates lang "build/$MODULE_ID/"
@@ -111,13 +115,13 @@ jobs:
           fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "El release $TAG ya existe: se reemplazan los archivos"
-            gh release upload "$TAG" module.json "$ZIP" --clobber
+            gh release upload "$TAG" module.json "$ZIP_NAME" --clobber
           else
             gh release create "$TAG" \
               --title "$TAG" \
               --generate-notes \
               $FLAGS \
-              module.json "$ZIP"
+              module.json "$ZIP_NAME"
           fi
 
       # Canal de pruebas: una etiqueta fija cuyos archivos se reemplazan en cada
@@ -140,9 +144,6 @@ jobs:
           set +e
           {
           set -x
-          # Ruta absoluta: el zip se arma desde dentro de build/ y gh lo busca
-          # desde la raiz del workspace, asi que una ruta relativa depende de
-          # quien mire y ya fallo una vez con "no matches found".
           DEV_ZIP="$GITHUB_WORKSPACE/$MODULE_ID-dev.zip"
           node -e "
             const fs = require('fs');
@@ -162,33 +163,10 @@ jobs:
             console.log('download = ' + m.download);
           "
           cp module.json "build/$MODULE_ID/module.json"
-          rm -f "$DEV_ZIP" "$GITHUB_WORKSPACE"/probe*.zip
-          # zip venia comprimiendo los archivos correctamente y saliendo con 0,
-          # pero dejando el resultado en otro lado, asi que la forma exacta de
-          # invocarlo importa. En vez de apostar a una, se prueban las dos que
-          # producen la estructura interna correcta y se usa la que exista.
-          echo "--- zip disponible ---"
-          which zip; zip -v 2>&1 | head -2
-          echo "--- A: relativa desde build (la forma que usa el paso que funciona) ---"
-          (cd build && zip -r "../probeA.zip" "$MODULE_ID"); echo "exitA=$?"
-          echo "--- B: absoluta desde build (la que venia fallando) ---"
-          (cd build && zip -r "$GITHUB_WORKSPACE/probeB.zip" "$MODULE_ID"); echo "exitB=$?"
-          echo "--- que quedo en disco ---"
-          ls -la "$GITHUB_WORKSPACE"/probe*.zip 2>&1
-          for cand in probeA.zip probeB.zip; do
-            if [ -s "$GITHUB_WORKSPACE/$cand" ]; then
-              echo "se usa la variante $cand"
-              mv "$GITHUB_WORKSPACE/$cand" "$DEV_ZIP"
-              break
-            fi
-          done
-          rm -f "$GITHUB_WORKSPACE"/probe*.zip
-          if [ -s "$DEV_ZIP" ]; then
-            echo "--- estructura interna del paquete elegido ---"
-            unzip -l "$DEV_ZIP"
-          else
-            echo "NINGUNA VARIANTE PRODUJO ARCHIVO"
-          fi
+          rm -f "$DEV_ZIP"
+          (cd build && zip -r "$DEV_ZIP" "$MODULE_ID")
+          echo "--- contenido del paquete de pruebas ---"
+          unzip -l "$DEV_ZIP"
           NOTES="Canal de pruebas. Los archivos de este release se reemplazan en cada version de prueba, asi la URL de instalacion no cambia. Contenido actual: $TAG (version $VERSION). Para una version concreta, usa su propio release."
           if gh release view dev; then
             echo "El canal ya existe: se reemplazan sus archivos"
