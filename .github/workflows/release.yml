@@ -125,6 +125,10 @@ jobs:
       # version sigue existiendo aparte, para poder volver a una rc concreta.
       - name: Actualizar el canal de pruebas
         if: steps.v.outputs.prerelease == 'true'
+        # El canal de pruebas es una comodidad, no parte del release: si falla,
+        # la version publicada arriba sigue siendo valida y el run no se marca
+        # como fallido por esto.
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.v.outputs.tag }}
@@ -152,12 +156,21 @@ jobs:
           (cd build && zip -qr "../$DEV_ZIP" "$MODULE_ID")
           NOTES="Canal de pruebas. Los archivos de este release se reemplazan en cada version de prueba, asi la URL de instalacion no cambia. Contenido actual: $TAG (version $VERSION). Para una version concreta, usa su propio release."
           if gh release view dev >/dev/null 2>&1; then
+            echo "El canal ya existe: se reemplazan sus archivos"
             gh release upload dev module.json "$DEV_ZIP" --clobber
             gh release edit dev --notes "$NOTES"
           else
+            echo "Creando el canal por primera vez en $GITHUB_SHA"
+            # --target explicito: la etiqueta "dev" no existe todavia y el
+            # checkout de un tag deja el repo en HEAD desasociado, asi que se le
+            # dice exactamente sobre que commit crearla.
             gh release create dev \
+              --target "$GITHUB_SHA" \
               --title "Canal de pruebas" \
               --notes "$NOTES" \
               --prerelease \
               module.json "$DEV_ZIP"
           fi
+          echo "Canal actualizado:"
+          gh release view dev --json tagName,name,isPrerelease,assets \
+            --jq '{tag: .tagName, prerelease: .isPrerelease, assets: [.assets[].name]}'
