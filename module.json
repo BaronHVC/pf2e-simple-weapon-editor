@@ -2,7 +2,7 @@
   "id": "pf2e-simple-weapon-editor",
   "title": "PF2e Simple Weapon Editor",
   "description": "A friendly editor window for PF2e weapons: damage, runes and traits without touching JSON or rule elements. / Editor amigable de armas para PF2e.",
-  "version": "0.6.0",
+  "version": "0.7.0-local",
   "authors": [
     {
       "name": "Carlos Eduardo + Claude"
