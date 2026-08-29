@@ -25,6 +25,7 @@
   "SWE.Revert": "Revertir",
   "SWE.Save": "Guardar",
   "SWE.Saved": "Arma guardada",
+  "SWE.NotAWeapon": "Este editor solo funciona con armas.",
   "SWE.SaveFailed": "No se pudo guardar",
   "SWE.Reverted": "Cambios revertidos",
   "SWE.OverLimitBlocked": "Demasiadas runas de propiedad para esa potencia. Activa el modo libre GM para guardar igualmente.",

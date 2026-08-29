@@ -112,20 +112,28 @@ function condAmount(c) {
 // damage ones are additionally emitted as rule elements so PF2e computes them
 // natively, but those are write-only output: they are regenerated from the flag
 // on every save and never parsed back.
+// Identical entries must collapse in BOTH the read and the save path. Deduping
+// only on read let a duplicated row save two identical damage rules while the
+// reopened editor showed a single one - the weapon dealt double until the next
+// save, with nothing in the UI saying why (caught live in the sandbox).
+function dedupeConds(list) {
+  const seen = new Map();
+  for (const c of list) seen.set(JSON.stringify(c), c);
+  return [...seen.values()];
+}
+
 function readConds(item) {
   const raw = item?._source?.flags?.[MODULE_ID]?.[COND_FLAG];
   if (!Array.isArray(raw)) return [];
-  const seen = new Map();
+  const cleaned = [];
   for (const entry of raw) {
     const c = normalizeCond(entry);
     // A criterion with nothing selected would match nothing and, being ANDed,
     // would disable the whole conditional.
     c.criteria = c.criteria.filter((crit) => crit.slug);
-    if (!c.criteria.length) continue;
-    // Identical entries would otherwise be counted twice when healing.
-    seen.set(JSON.stringify(c), c);
+    if (c.criteria.length) cleaned.push(c);
   }
-  return [...seen.values()];
+  return dedupeConds(cleaned);
 }
 
 function slugOf(name) {
@@ -270,6 +278,13 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
   static instances = new Map();
 
   static open(item) {
+    // The header button only ever appears on weapons, but the module API is
+    // public: rendering the editor on anything else would let a save write
+    // weapon fields onto it (found by probing the API in the sandbox).
+    if (item?.type !== "weapon") {
+      ui.notifications.warn(i18n("NotAWeapon"));
+      return null;
+    }
     const key = item.uuid ?? item.id;
     const existing = SimpleWeaponEditor.instances.get(key);
     if (existing) {
@@ -921,9 +936,11 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     // nothing, and criteria are ANDed, so it would silently disable its whole
     // conditional. Drop the empties and say how many rather than save a rule
     // that never fires.
-    const conds = d.conditionals
-      .map((c) => ({ ...c, criteria: c.criteria.filter((crit) => crit.slug) }))
-      .filter((c) => c.criteria.length);
+    const conds = dedupeConds(
+      d.conditionals
+        .map((c) => ({ ...c, criteria: c.criteria.filter((crit) => crit.slug) }))
+        .filter((c) => c.criteria.length)
+    );
     const droppedCrits =
       d.conditionals.reduce((n, c) => n + c.criteria.filter((x) => !x.slug).length, 0);
     const incomplete = d.conditionals.length - conds.length + droppedCrits;

@@ -25,6 +25,7 @@
   "SWE.Revert": "Revert",
   "SWE.Save": "Save",
   "SWE.Saved": "Weapon saved",
+  "SWE.NotAWeapon": "This editor only works on weapons.",
   "SWE.SaveFailed": "Could not save",
   "SWE.Reverted": "Changes reverted",
   "SWE.OverLimitBlocked": "Too many property runes for that potency. Enable GM free mode to save anyway.",
