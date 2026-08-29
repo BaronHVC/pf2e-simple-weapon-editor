@@ -24,7 +24,14 @@ function critRollOptions(crit) {
   // A feat and a feature are both stored as feat items but announce themselves
   // under different prefixes, so a criterion pointing at either has to test both.
   const bases = crit.filter === "feat" ? ["feat", "feature"] : [crit.filter];
-  return bases.flatMap((b) => [`${b}:${crit.slug}`, `self:${b}:${crit.slug}`]);
+  const opts = bases.flatMap((b) => [`${b}:${crit.slug}`, `self:${b}:${crit.slug}`]);
+  // An adopted ancestry never reaches the actor's roll options: the system only
+  // records it in details.ancestry (verified against this world's own Adopted
+  // Ancestry feat and the ancestry document source, which derives no option
+  // from countsAs). The weapon publishes it as swe-adopted:<slug> through the
+  // helper rule emitted on save, and ancestry criteria accept that shape too.
+  if (crit.filter === "ancestry") opts.push(`swe-adopted:${crit.slug}`);
+  return opts;
 }
 
 // Entries of a PF2e predicate are ANDed, so one {or:[...]} per criterion reads
@@ -41,13 +48,17 @@ function actorMatchesCrit(actor, crit) {
   if (crit.filter === "feat") {
     const feats = actor.itemTypes?.feat ?? [];
     if (feats.some((f) => (f.slug || slugOf(f.name)) === crit.slug)) return true;
+  } else if (crit.filter === "ancestry") {
+    // countsAs is the system's own "treat the actor as this ancestry" list: it
+    // starts with the real ancestry and feats like Adopted Ancestry append to
+    // it, so matching it covers adoption without caring how it was obtained.
+    const det = actor.system?.details?.ancestry;
+    if (actor.ancestry?.slug === crit.slug) return true;
+    if (det?.adopted === crit.slug) return true;
+    if (Array.isArray(det?.countsAs) && det.countsAs.includes(crit.slug)) return true;
   } else {
-    const direct = {
-      ancestry: actor.ancestry?.slug,
-      heritage: actor.heritage?.slug,
-      class: actor.class?.slug
-    }[crit.filter];
-    if (direct) return direct === crit.slug;
+    const direct = { heritage: actor.heritage?.slug, class: actor.class?.slug }[crit.filter];
+    if (direct === crit.slug) return true;
   }
   try {
     const opts = actor.getRollOptions?.() ?? [];
@@ -166,6 +177,18 @@ async function condChoices() {
 function condLabel(choices, crit) {
   const hit = (choices?.[crit.filter] ?? []).find((o) => o.value === crit.slug);
   return hit ? hit.label : null;
+}
+
+// The target fields are search inputs backed by datalists, so what arrives from
+// the form is a label, not a slug. An exact label match (accent-insensitive,
+// for the es locale) resolves to its slug; anything else is kept slugified so
+// the row can flag it as unknown instead of silently dropping what was typed.
+function resolveCritInput(choices, filter, text) {
+  const t = String(text ?? "").trim();
+  if (!t) return "";
+  const norm = (s) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const hit = (choices?.[filter] ?? []).find((o) => norm(o.label) === norm(t));
+  return hit ? hit.value : slugOf(t);
 }
 
 function i18n(key) {
@@ -488,6 +511,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     }
     const critPreview = critParts.join(" · ");
     const choices = await condChoices();
+    this._condChoices = choices;
     const condIndexed = d.conditionals.map((c, i) => ({
       ...c,
       index: i,
@@ -501,7 +525,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
           index: j,
           condIndex: i,
           first: j === 0,
-          options: choices[crit.filter] ?? [],
+          display: resolved ?? crit.slug,
           resolved,
           unknown: !!crit.slug && !resolved
         };
@@ -537,6 +561,13 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         label: labelFor(cfg.weaponTraits, slug)
       })),
       condIndexed,
+      // One shared datalist per filter type instead of options per row. The feat
+      // list is in the thousands, so its datalist starts empty and is filled
+      // with the top matches while the user types (see _onRender).
+      datalists: ["ancestry", "heritage", "class"].map((k) => ({
+        key: k,
+        options: choices[k] ?? []
+      })),
       filterOptions: COND_FILTERS.map((f) => ({
         value: f,
         label: i18n(`Filter_${f}`)
@@ -573,6 +604,37 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     }
     // Switching ancestry/heritage/class leaves the previously picked target
     // pointing at a list it no longer belongs to, so clear it on the way through.
+    const isCritTarget = (el) => /^conds\.\d+\.criteria\.\d+\.slugInput$/.test(el.name ?? "");
+    for (const el of form.querySelectorAll("input[type=text]")) {
+      if (!isCritTarget(el)) continue;
+      el.addEventListener("change", () => {
+        this.syncFromForm();
+        this.render();
+      });
+    }
+    // The feat list is too large to render in full, so its shared datalist is
+    // rebuilt with the top matches of whatever the focused input holds.
+    const featList = form.querySelector("#swe-dl-feat");
+    if (featList) {
+      const fill = (q) => {
+        const all = this._condChoices?.feat ?? [];
+        const t = q.trim().toLowerCase();
+        const hits =
+          t.length < 2
+            ? []
+            : all.filter((o) => o.label.toLowerCase().includes(t)).slice(0, 50);
+        featList.replaceChildren(
+          ...hits.map((o) => {
+            const opt = document.createElement("option");
+            opt.value = o.label;
+            return opt;
+          })
+        );
+      };
+      for (const el of form.querySelectorAll('input[list="swe-dl-feat"]')) {
+        el.addEventListener("input", () => fill(el.value));
+      }
+    }
     for (const el of form.querySelectorAll("select")) {
       if (!isCondFilter(el)) continue;
       el.addEventListener("change", () => {
@@ -644,7 +706,14 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         const criteria = raw.criteria
           ? Object.keys(raw.criteria)
               .sort(byIndex)
-              .map((ck) => raw.criteria[ck] ?? {})
+              .map((ck) => {
+                const e = raw.criteria[ck] ?? {};
+                const slug =
+                  e.slugInput !== undefined
+                    ? resolveCritInput(this._condChoices, e.filter, e.slugInput)
+                    : e.slug;
+                return { filter: e.filter, slug };
+              })
           : [];
         arr.push(normalizeCond({ ...raw, criteria }));
       }
@@ -875,6 +944,25 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
           ? { ...base, key: "DamageDice", diceNumber: Number(c.value) || 1, dieSize: c.die }
           : { ...base, key: "FlatModifier", value: Number(c.value) || 1 };
       });
+    // Damage predicates can only see roll options, and the system never turns an
+    // adoption into one, so any weapon with an ancestry damage conditional also
+    // carries a helper rule that publishes the wielder's adopted ancestry as
+    // swe-adopted:<slug>. Gated on the feat so actors without it resolve nothing.
+    const needsAdopted = conds.some(
+      (c) => c.effect === "damage" && c.criteria.some((k) => k.filter === "ancestry")
+    );
+    const helperRules = needsAdopted
+      ? [
+          {
+            key: "ActiveEffectLike",
+            slug: `${SWE_COND_SLUG}-adopted`,
+            mode: "override",
+            path: "flags.pf2e.rollOptions.all.swe-adopted:{actor|system.details.ancestry.adopted}",
+            value: true,
+            predicate: ["feat:adopted-ancestry"]
+          }
+        ]
+      : [];
     const update = {
       name: d.name || this.item.name,
       "system.level.value": Number(d.level) || 0,
@@ -886,7 +974,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       "system.runes.striking": Number(d.runes.striking) || 0,
       "system.runes.property": [...d.runes.property],
       "system.traits.value": [...d.traits],
-      "system.rules": [...keep, ...sweRules, ...persRules, ...condRules],
+      "system.rules": [...keep, ...sweRules, ...persRules, ...helperRules, ...condRules],
       [`flags.${MODULE_ID}.${COND_FLAG}`]: conds
     };
     if (d.totalGp !== undefined) {

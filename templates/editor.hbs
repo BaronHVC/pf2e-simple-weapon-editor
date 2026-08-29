@@ -178,12 +178,7 @@
           <option value="{{this.value}}" {{#if (sweEq this.value ../filter)}}selected{{/if}}>{{this.label}}</option>
           {{/each}}
         </select>
-        <select name="conds.{{this.condIndex}}.criteria.{{this.index}}.slug" class="swe-cond-target">
-          <option value="">{{localize "SWE.CondPickTarget"}}</option>
-          {{#each this.options}}
-          <option value="{{this.value}}" {{#if (sweEq this.value ../slug)}}selected{{/if}}>{{this.label}}</option>
-          {{/each}}
-        </select>
+        <input type="text" name="conds.{{this.condIndex}}.criteria.{{this.index}}.slugInput" value="{{this.display}}" list="swe-dl-{{this.filter}}" class="swe-cond-target" placeholder="{{localize 'SWE.CondSearchPh'}}" autocomplete="off" spellcheck="false" />
         <a data-action="sweRemoveCrit" data-cond="{{this.condIndex}}" data-index="{{this.index}}" title="{{localize 'SWE.Remove'}}"><i class="fa-solid fa-xmark"></i></a>
       </div>
       {{#if this.unknown}}
@@ -228,6 +223,13 @@
     <div class="swe-row">
       <button type="button" data-action="sweAddCond"><i class="fa-solid fa-plus"></i> {{localize "SWE.AddCond"}}</button>
     </div>
+
+    {{#each datalists}}
+    <datalist id="swe-dl-{{this.key}}">
+      {{#each this.options}}<option value="{{this.label}}"></option>{{/each}}
+    </datalist>
+    {{/each}}
+    <datalist id="swe-dl-feat"></datalist>
   </fieldset>
 
   <footer class="swe-footer">

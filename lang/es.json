@@ -49,6 +49,7 @@
   "SWE.CondIf": "Si",
   "SWE.CondThen": "entonces",
   "SWE.CondPickTarget": "Elige una…",
+  "SWE.CondSearchPh": "Escribe para buscar…",
   "SWE.AddCond": "Añadir condición",
   "SWE.CondUnknown": "Esta opción no está en ningún compendio instalado, así que nunca va a coincidir",
   "SWE.CondNoTarget": "No se guardaron las condiciones sin nada seleccionado",

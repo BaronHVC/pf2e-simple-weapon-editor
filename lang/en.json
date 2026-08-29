@@ -49,6 +49,7 @@
   "SWE.CondIf": "If",
   "SWE.CondThen": "then",
   "SWE.CondPickTarget": "Pick one…",
+  "SWE.CondSearchPh": "Type to search…",
   "SWE.AddCond": "Add condition",
   "SWE.CondUnknown": "This option is not in any installed compendium, so it will never match",
   "SWE.CondNoTarget": "Conditions with nothing selected were not saved",
