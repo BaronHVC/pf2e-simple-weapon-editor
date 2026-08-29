@@ -45,6 +45,7 @@
   "SWE.RunesPriceHint": "Value contributed by runes (automatic).",
   "SWE.PriceFloor": "Runes alone are worth more than that; minimum total",
   "SWE.Conditionals": "Wielder conditions",
+  "SWE.TabConds": "Conditions",
   "SWE.CondHint": "Effects that only apply depending on who carries the weapon.",
   "SWE.CondIf": "If",
   "SWE.CondThen": "then",

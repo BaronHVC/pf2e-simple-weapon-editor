@@ -263,6 +263,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     this.item = item;
     this.data = SimpleWeaponEditor.extract(item);
     this.selectedRune = null;
+    this._sweTab = "damage";
   }
 
   static _runeIndexPromise = null;
@@ -459,6 +460,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       sweRemoveCond: SimpleWeaponEditor.actRemoveCond,
       sweAddCrit: SimpleWeaponEditor.actAddCrit,
       sweRemoveCrit: SimpleWeaponEditor.actRemoveCrit,
+      sweTab: SimpleWeaponEditor.actTab,
       sweRevert: SimpleWeaponEditor.actRevert
     }
   };
@@ -560,6 +562,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         slug,
         label: labelFor(cfg.weaponTraits, slug)
       })),
+      activeTab: this._sweTab ?? "damage",
       condIndexed,
       // One shared datalist per filter type instead of options per row. The feat
       // list is in the thousands, so its datalist starts empty and is filled
@@ -835,6 +838,13 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     } else {
       cond.criteria = cond.criteria.filter((c, j) => j !== idx);
     }
+    this.render();
+  }
+
+  static actTab(event, target) {
+    // Sync first so switching tabs never loses what was just typed.
+    this.syncFromForm();
+    this._sweTab = target?.dataset?.tab ?? "damage";
     this.render();
   }
 

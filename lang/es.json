@@ -45,6 +45,7 @@
   "SWE.RunesPriceHint": "Valor aportado por las runas (automático).",
   "SWE.PriceFloor": "Solo las runas ya valen más que eso; total mínimo",
   "SWE.Conditionals": "Condiciones por portador",
+  "SWE.TabConds": "Condiciones",
   "SWE.CondHint": "Efectos que solo se aplican según quién lleve el arma.",
   "SWE.CondIf": "Si",
   "SWE.CondThen": "entonces",

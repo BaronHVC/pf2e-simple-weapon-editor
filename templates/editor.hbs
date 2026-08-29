@@ -16,7 +16,14 @@
     </div>
   </header>
 
-  <fieldset class="swe-section">
+  <nav class="swe-tabs">
+    <a data-action="sweTab" data-tab="damage" class="{{#if (sweEq activeTab 'damage')}}active{{/if}}"><i class="fa-solid fa-droplet"></i> {{localize "SWE.Damage"}}</a>
+    <a data-action="sweTab" data-tab="runes" class="{{#if (sweEq activeTab 'runes')}}active{{/if}}"><i class="fa-solid fa-wand-magic-sparkles"></i> {{localize "SWE.Runes"}}</a>
+    <a data-action="sweTab" data-tab="traits" class="{{#if (sweEq activeTab 'traits')}}active{{/if}}"><i class="fa-solid fa-tags"></i> {{localize "SWE.Traits"}}</a>
+    <a data-action="sweTab" data-tab="conds" class="{{#if (sweEq activeTab 'conds')}}active{{/if}}"><i class="fa-solid fa-users"></i> {{localize "SWE.TabConds"}}</a>
+  </nav>
+
+  <fieldset class="swe-section swe-tabpanel{{#if (sweEq activeTab 'damage')}} active{{/if}}">
     <legend><i class="fa-solid fa-droplet"></i> {{localize "SWE.Damage"}}</legend>
 
     <div class="swe-row">
@@ -90,7 +97,7 @@
     {{/if}}
   </fieldset>
 
-  <fieldset class="swe-section">
+  <fieldset class="swe-section swe-tabpanel{{#if (sweEq activeTab 'runes')}} active{{/if}}">
     <legend><i class="fa-solid fa-wand-magic-sparkles"></i> {{localize "SWE.Runes"}}</legend>
     <div class="swe-grid2">
       <label>{{localize "SWE.Potency"}}
@@ -144,7 +151,7 @@
     {{/if}}
   </fieldset>
 
-  <fieldset class="swe-section">
+  <fieldset class="swe-section swe-tabpanel{{#if (sweEq activeTab 'traits')}} active{{/if}}">
     <legend><i class="fa-solid fa-tags"></i> {{localize "SWE.Traits"}}</legend>
     <div class="swe-chiplist">
       {{#each traitsResolved}}
@@ -164,7 +171,7 @@
     </div>
   </fieldset>
 
-  <fieldset class="swe-section">
+  <fieldset class="swe-section swe-tabpanel{{#if (sweEq activeTab 'conds')}} active{{/if}}">
     <legend><i class="fa-solid fa-users"></i> {{localize "SWE.Conditionals"}}</legend>
     <p class="swe-hint">{{localize "SWE.CondHint"}}</p>
 
