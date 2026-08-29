@@ -1072,33 +1072,23 @@ async function runHealing(actor, timing, { itemId = null } = {}) {
   if (!isSoleExecutor()) return;
   const entries = healEntriesFor(actor, timing, itemId);
   if (!entries.length) return;
-  let total = 0;
+  // All matching entries roll together as one real roll message, so the dice
+  // are seen being thrown (and 3D dice modules animate them). The system's own
+  // "healed for X" card is the receipt, so no extra text message is posted.
   const parts = [];
+  const names = new Set();
   for (const { item, cond } of entries) {
-    let amount = Number(cond.value) || 0;
-    if (cond.die) {
-      try {
-        const roll = await new Roll(`${cond.value}${cond.die}`).evaluate();
-        amount = Number(roll.total) || 0;
-      } catch (err) {
-        console.warn(`${MODULE_ID} | healing roll failed`, err);
-        continue;
-      }
-    }
-    if (amount > 0) {
-      total += amount;
-      parts.push(`${item.name}: +${amount}`);
-    }
+    parts.push(cond.die ? `${cond.value}${cond.die}` : `${cond.value}`);
+    names.add(item.name);
   }
-  if (total <= 0) return;
   try {
-    await applyHealing(actor, total);
-    // One batched message: a weapon with several matching conditionals, or an
-    // actor holding more than one, should not spam the log.
-    await ChatMessage.create({
+    const roll = await new Roll(parts.join(" + ")).evaluate();
+    if (!(Number(roll.total) > 0)) return;
+    await roll.toMessage({
       speaker: ChatMessage.getSpeaker({ actor }),
-      content: `<p><strong>${i18n(timing === "healTurn" ? "HealTurn" : "HealHit")}: +${total}</strong></p><p>${parts.join(" · ")}</p>`
+      flavor: `${i18n(timing === "healTurn" ? "HealTurn" : "HealHit")} · ${[...names].join(" · ")}`
     });
+    await applyHealing(actor, Number(roll.total));
   } catch (err) {
     console.error(`${MODULE_ID} | healing failed`, err);
   }
