@@ -959,6 +959,12 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
             mode: "override",
             path: "flags.pf2e.rollOptions.all.swe-adopted:{actor|system.details.ancestry.adopted}",
             value: true,
+            // Very late on purpose. The adopted slot is overridden by every
+            // "counts as" source in sequence, and resolving mid-chain captured
+            // the wrong one (seen live: an actor whose final slot said android
+            // published swe-adopted:dragon). At 999 the path resolves after
+            // every override, i.e. the same value the sheet shows.
+            priority: 999,
             predicate: ["feat:adopted-ancestry"]
           }
         ]
@@ -1043,13 +1049,18 @@ function healEntriesFor(actor, timing, onlyItemId = null) {
 // HP and the dying/wounded track. The clamped update is only a fallback.
 async function applyHealing(actor, total) {
   if (!(total > 0)) return;
-  try {
-    if (typeof actor.applyDamage === "function") {
-      await actor.applyDamage({ damage: -total, skipIWR: true });
+  // PF2e's applyDamage builds its own chat card from the token and crashes
+  // without one (verified against 8.4.1: it reads the token's name), so it is
+  // only used when the wielder has a linked token; anyone else gets the plain
+  // clamped update below.
+  const token = actor.getActiveTokens?.(true, true)?.[0] ?? null;
+  if (token && typeof actor.applyDamage === "function") {
+    try {
+      await actor.applyDamage({ damage: -total, token, skipIWR: true });
       return;
+    } catch (err) {
+      console.warn(`${MODULE_ID} | applyDamage failed, using fallback`, err);
     }
-  } catch (err) {
-    console.warn(`${MODULE_ID} | applyDamage failed, using fallback`, err);
   }
   const hp = actor.system?.attributes?.hp;
   if (!hp) return;
