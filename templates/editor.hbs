@@ -32,6 +32,9 @@
         {{#if baseNote}}
         <span class="swe-block-note">{{localize "SWE.WithStriking"}} <b>{{baseNote}}</b></span>
         {{/if}}
+        {{#if strikingIgnored}}
+        <span class="swe-block-note">{{localize "SWE.StrikingIgnored"}}</span>
+        {{/if}}
       </div>
       <div class="swe-row">
         <input type="number" name="damage.dice" value="{{data.damage.dice}}" min="1" max="12" step="1" class="swe-narrow" />
@@ -46,6 +49,11 @@
           <option value="{{this.value}}" {{#if (sweEq this.value ../data.damage.damageType)}}selected{{/if}}>{{this.label}}</option>
           {{/each}}
         </select>
+      </div>
+      <div class="swe-row">
+        <span class="swe-tag">{{localize "SWE.Splash"}}</span>
+        <input type="number" name="splash" value="{{data.splash}}" min="0" max="99" step="1" class="swe-narrow" />
+        <span class="swe-splash-hint">{{localize "SWE.SplashHint"}}</span>
       </div>
     </div>
 

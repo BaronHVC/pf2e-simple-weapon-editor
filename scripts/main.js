@@ -473,6 +473,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         die: DIES.includes(rawDie) ? rawDie : "d4",
         damageType: src.damage?.damageType ?? "slashing"
       },
+      splash: clampInt(src.splashDamage?.value, 0, 99, 0),
       extras,
       persistents,
       runes: {
@@ -535,7 +536,10 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     const cfg = CONFIG.PF2E ?? {};
     const striking = Number(d.runes.striking) || 0;
     const potency = Number(d.runes.potency) || 0;
-    const totalDice = (Number(d.damage.dice) || 1) + striking;
+    // Verified against the system by rolling: an authored dice count above 1
+    // overrides striking entirely; only a 1-die weapon gets 1 + striking dice.
+    const baseDice = Number(d.damage.dice) || 1;
+    const totalDice = baseDice > 1 ? baseDice : 1 + striking;
     const typeLabel = labelFor(cfg.damageTypes, d.damage.damageType);
     const overLimit = d.runes.property.length > potency;
     const previewParts = [
@@ -557,6 +561,12 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       previewParts.push({
         text: ` + ${amount} ${pl} ${i18n("PersistentShort")}`,
         color: dotFor(p.type)
+      });
+    }
+    if (d.splash > 0) {
+      previewParts.push({
+        text: ` + ${d.splash} ${i18n("Splash").toLowerCase()}`,
+        color: dotFor(d.damage.damageType)
       });
     }
     let preview = previewParts.map((x) => x.text).join("");
@@ -671,7 +681,8 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       previewParts,
       baseDot: dotFor(d.damage.damageType),
       baseIcon: iconFor(d.damage.damageType),
-      baseNote: striking > 0 ? `${totalDice}${d.damage.die}` : null,
+      baseNote: striking > 0 && baseDice === 1 ? `${totalDice}${d.damage.die}` : null,
+      strikingIgnored: striking > 0 && baseDice > 1,
       freqTraits,
       critPreview,
       overLimit,
@@ -755,6 +766,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     if (o.name !== undefined) d.name = String(o.name);
     if (o.level !== undefined) d.level = Number(o.level) || 0;
     if (o.totalGp !== undefined) d.totalGp = String(o.totalGp).trim();
+    if (o.splash !== undefined) d.splash = clampInt(o.splash, 0, 99, 0);
     if (o.damage) {
       if (o.damage.dice !== undefined) d.damage.dice = Number(o.damage.dice) || 1;
       if (o.damage.die !== undefined) d.damage.die = String(o.damage.die);
@@ -1021,6 +1033,13 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         label: mkLabel(SWE_MARK, e, tl)
       };
     });
+    // Splash without its trait does nothing, so setting an amount brings the
+    // trait along; the trait alone is left to the user (it may be there for
+    // other reasons, so clearing the amount never removes it).
+    if ((Number(d.splash) || 0) > 0 && !d.traits.includes("splash")) {
+      d.traits.push("splash");
+      d.traits.sort();
+    }
     // A criterion with no target selected would emit a predicate that matches
     // nothing, and criteria are ANDed, so it would silently disable its whole
     // conditional. Drop the empties and say how many rather than save a rule
@@ -1092,6 +1111,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       "system.damage.die": d.damage.die,
       "system.damage.damageType": d.damage.damageType,
       "system.damage.persistent": persistent,
+      "system.splashDamage.value": Number(d.splash) || 0,
       "system.runes.potency": Number(d.runes.potency) || 0,
       "system.runes.striking": Number(d.runes.striking) || 0,
       "system.runes.property": [...d.runes.property],
