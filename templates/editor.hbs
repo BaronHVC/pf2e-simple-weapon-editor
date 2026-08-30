@@ -76,8 +76,21 @@
           <option value="{{this.value}}" {{#if (sweEq this.value ../this.type)}}selected{{/if}}>{{this.label}}</option>
           {{/each}}
         </select>
+        <select name="extras.{{this.index}}.category" class="swe-cat" title="{{localize 'SWE.SplashHint'}}">
+          <option value="" {{#unless this.category}}selected{{/unless}}>&mdash;</option>
+          <option value="splash" {{#if (sweEq this.category 'splash')}}selected{{/if}}>{{localize "SWE.Splash"}}</option>
+        </select>
         <input type="text" name="extras.{{this.index}}.src" value="{{this.src}}" placeholder="{{localize 'SWE.SourcePh'}}" class="swe-src" />
         <a class="swe-rowdel" data-action="sweRemoveDamage" data-index="{{this.index}}" title="{{localize 'SWE.Remove'}}"><i class="fa-solid fa-trash"></i></a>
+      </div>
+      {{/each}}
+      {{#each dmgCondRows}}
+      <div class="swe-locked-row">
+        <i class="fa-solid fa-lock swe-lock" title="{{localize 'SWE.EditInConds'}}"></i>
+        <i class="swe-dmgicon fa-solid {{this.icon}}" style="color: {{this.dot}}"></i>
+        <span class="swe-locked-amount" style="color: {{this.dot}}">+{{this.amount}} {{this.typeLabel}}</span>
+        <span class="swe-locked-reason">{{localize "SWE.FromCond"}} {{this.reason}}</span>
+        <a class="swe-rowdel" data-action="sweRemoveCond" data-index="{{this.condIndex}}" title="{{localize 'SWE.RemoveCond'}}"><i class="fa-solid fa-trash"></i></a>
       </div>
       {{/each}}
       <button type="button" data-action="sweAddDamage" class="swe-ghostbtn swe-ghost-extra"><i class="fa-solid fa-plus"></i> {{localize "SWE.Extra"}}</button>

@@ -46,6 +46,8 @@
   "SWE.RunesPriceHint": "Value contributed by runes (automatic).",
   "SWE.Splash": "Splash",
   "SWE.SplashHint": "hits everything within 5 ft on a hit; the target keeps it even on a miss. Uses the base damage type.",
+  "SWE.FromCond": "when:",
+  "SWE.EditInConds": "Edited in the Conditions tab. Deleting here removes the condition.",
   "SWE.ExtrasHead": "Extra damage",
   "SWE.PersExplain": "keeps dealing damage each round",
   "SWE.StrikingIgnored": "striking does not change the dice here (manual dice count)",

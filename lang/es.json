@@ -46,6 +46,8 @@
   "SWE.RunesPriceHint": "Valor aportado por las runas (automático).",
   "SWE.Splash": "Salpicadura",
   "SWE.SplashHint": "golpea todo a 5 pies al impactar; el objetivo la recibe incluso al fallar. Usa el tipo del daño base.",
+  "SWE.FromCond": "si:",
+  "SWE.EditInConds": "Se edita en la pesta\u00f1a Condiciones. Borrar aqu\u00ed elimina la condici\u00f3n.",
   "SWE.ExtrasHead": "Da\u00f1o extra",
   "SWE.PersExplain": "sigue haciendo da\u00f1o cada ronda",
   "SWE.StrikingIgnored": "striking no cambia los dados aquí (cantidad fijada a mano)",

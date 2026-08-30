@@ -438,19 +438,22 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       const mark = isPers ? SWE_PERS : SWE_MARK;
       let srcLabel = r.label.slice(mark.length).trim();
       if (AUTO_LABEL_RE.test(srcLabel)) srcLabel = "";
+      const category = r.category === "splash" || r.damageCategory === "splash" ? "splash" : "";
       if (r.key === "DamageDice") {
         bucket.push({
           value: r.diceNumber ?? 1,
           die: r.dieSize ?? "d6",
           type: r.damageType ?? "fire",
-          src: srcLabel
+          src: srcLabel,
+          category
         });
       } else if (r.key === "FlatModifier") {
         bucket.push({
           value: r.value ?? 1,
           die: "",
           type: r.damageType ?? "fire",
-          src: srcLabel
+          src: srcLabel,
+          category
         });
       }
     }
@@ -458,6 +461,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     for (const e of extras) {
       e.value = clampInt(e.value, 1, 99, 1);
       if (e.die && !DIES.includes(e.die)) e.die = "d6";
+      e.category = e.category === "splash" ? "splash" : "";
     }
     for (const e of persistents) {
       e.value = clampInt(e.value, 1, 99, 1);
@@ -550,8 +554,9 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     ];
     for (const e of d.extras) {
       const tl = labelFor(cfg.damageTypes, e.type);
+      const cat = e.category === "splash" ? ` ${i18n("Splash").toLowerCase()}` : "";
       previewParts.push({
-        text: e.die ? ` + ${e.value}${e.die} ${tl}` : ` + ${e.value} ${tl}`,
+        text: (e.die ? ` + ${e.value}${e.die} ${tl}` : ` + ${e.value} ${tl}`) + cat,
         color: dotFor(e.type)
       });
     }
@@ -612,6 +617,20 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         };
       })
     }));
+    // The damage tab shows the complete picture: damage conditionals appear
+    // there as locked rows with the reason they exist. They are edited in the
+    // Conditions tab; the trash on the mirror removes the conditional itself.
+    const dmgCondRows = d.conditionals
+      .map((c, i) => ({ c, i }))
+      .filter((x) => x.c.effect === "damage")
+      .map(({ c, i }) => ({
+        condIndex: i,
+        amount: condAmount(c),
+        typeLabel: labelFor(cfg.damageTypes, c.type),
+        dot: dotFor(c.type),
+        icon: iconFor(c.type),
+        reason: c.src || c.criteria.map((cr) => condLabel(choices, cr) ?? cr.slug).join(" + ")
+      }));
     const derivedGp = Number(this.item.system?.price?.value?.gp ?? 0);
     const baseGp = Number(this.item._source.system?.price?.value?.gp ?? 0);
     const runesGp = Math.max(0, derivedGp - baseGp);
@@ -640,6 +659,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         { value: 3, label: i18n("Striking3") }
       ],
       extrasIndexed: d.extras.map((e, i) => ({ ...e, index: i, dot: dotFor(e.type), icon: iconFor(e.type) })),
+      dmgCondRows,
       persIndexed: d.persistents.map((e, i) => ({ ...e, index: i, dot: dotFor(e.type), icon: iconFor(e.type) })),
       runesResolved: d.runes.property.map((slug, i) => {
         const ri = runeInfos[i] ?? {};
@@ -780,7 +800,8 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
           value: Number(e.value) || 1,
           die: e.die ?? "",
           type: e.type ?? "fire",
-          src: String(e.src ?? "").trim()
+          src: String(e.src ?? "").trim(),
+          category: e.category === "splash" ? "splash" : ""
         });
       }
       d.extras = arr;
@@ -828,7 +849,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
 
   static actAddDamage(event, target) {
     this.syncFromForm();
-    this.data.extras.push({ value: 1, die: "d6", type: "fire", src: "" });
+    this.data.extras.push({ value: 1, die: "d6", type: "fire", src: "", category: "" });
     this.render();
   }
 
@@ -1015,8 +1036,9 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     });
     const sweRules = d.extras.map((e) => {
       const tl = labelFor(cfg.damageTypes, e.type);
+      const splash = e.category === "splash";
       if (e.die) {
-        return {
+        const rule = {
           key: "DamageDice",
           selector: "{item|id}-damage",
           diceNumber: Number(e.value) || 1,
@@ -1024,14 +1046,18 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
           damageType: e.type,
           label: mkLabel(SWE_MARK, e, tl)
         };
+        if (splash) rule.category = "splash";
+        return rule;
       }
-      return {
+      const rule = {
         key: "FlatModifier",
         selector: "{item|id}-damage",
         value: Number(e.value) || 1,
         damageType: e.type,
         label: mkLabel(SWE_MARK, e, tl)
       };
+      if (splash) rule.damageCategory = "splash";
+      return rule;
     });
     // Splash without its trait does nothing, so setting an amount brings the
     // trait along; the trait alone is left to the user (it may be there for
