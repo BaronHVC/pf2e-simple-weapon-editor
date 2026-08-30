@@ -83,7 +83,13 @@
           {{/each}}
         </select>
         {{#if this.saveType}}
+        <select name="extras.{{this.index}}.saveDcMode" class="swe-cat" title="{{localize 'SWE.DcAutoHint'}}">
+          <option value="fixed" {{#unless (sweEq this.saveDcMode 'auto')}}selected{{/unless}}>{{localize "SWE.DcFixed"}}</option>
+          <option value="auto" {{#if (sweEq this.saveDcMode 'auto')}}selected{{/if}}>{{localize "SWE.DcAuto"}}</option>
+        </select>
+        {{#unless (sweEq this.saveDcMode 'auto')}}
         <input type="number" name="extras.{{this.index}}.saveDc" value="{{this.saveDc}}" min="1" max="60" step="1" class="swe-narrow" title="{{localize 'SWE.SaveDC'}}" />
+        {{/unless}}
         <select name="extras.{{this.index}}.saveOut" class="swe-cat">
           <option value="half" {{#if (sweEq this.saveOut 'half')}}selected{{/if}}>{{localize "SWE.SaveHalf"}}</option>
           <option value="none" {{#if (sweEq this.saveOut 'none')}}selected{{/if}}>{{localize "SWE.SaveNone"}}</option>
@@ -132,7 +138,13 @@
           {{/each}}
         </select>
         {{#if this.saveType}}
+        <select name="splashes.{{this.index}}.saveDcMode" class="swe-cat" title="{{localize 'SWE.DcAutoHint'}}">
+          <option value="fixed" {{#unless (sweEq this.saveDcMode 'auto')}}selected{{/unless}}>{{localize "SWE.DcFixed"}}</option>
+          <option value="auto" {{#if (sweEq this.saveDcMode 'auto')}}selected{{/if}}>{{localize "SWE.DcAuto"}}</option>
+        </select>
+        {{#unless (sweEq this.saveDcMode 'auto')}}
         <input type="number" name="splashes.{{this.index}}.saveDc" value="{{this.saveDc}}" min="1" max="60" step="1" class="swe-narrow" title="{{localize 'SWE.SaveDC'}}" />
+        {{/unless}}
         <select name="splashes.{{this.index}}.saveOut" class="swe-cat">
           <option value="half" {{#if (sweEq this.saveOut 'half')}}selected{{/if}}>{{localize "SWE.SaveHalf"}}</option>
           <option value="none" {{#if (sweEq this.saveOut 'none')}}selected{{/if}}>{{localize "SWE.SaveNone"}}</option>
@@ -172,7 +184,13 @@
           {{/each}}
         </select>
         {{#if this.saveType}}
+        <select name="pers.{{this.index}}.saveDcMode" class="swe-cat" title="{{localize 'SWE.DcAutoHint'}}">
+          <option value="fixed" {{#unless (sweEq this.saveDcMode 'auto')}}selected{{/unless}}>{{localize "SWE.DcFixed"}}</option>
+          <option value="auto" {{#if (sweEq this.saveDcMode 'auto')}}selected{{/if}}>{{localize "SWE.DcAuto"}}</option>
+        </select>
+        {{#unless (sweEq this.saveDcMode 'auto')}}
         <input type="number" name="pers.{{this.index}}.saveDc" value="{{this.saveDc}}" min="1" max="60" step="1" class="swe-narrow" title="{{localize 'SWE.SaveDC'}}" />
+        {{/unless}}
         <select name="pers.{{this.index}}.saveOut" class="swe-cat">
           <option value="half" {{#if (sweEq this.saveOut 'half')}}selected{{/if}}>{{localize "SWE.SaveHalf"}}</option>
           <option value="none" {{#if (sweEq this.saveOut 'none')}}selected{{/if}}>{{localize "SWE.SaveNone"}}</option>

@@ -109,10 +109,14 @@ function normalizeCond(c) {
 // rule), and a companion Note rule renders the @Check button on damage cards.
 function normalizeSave(e) {
   const type = String(e?.saveType ?? "").trim();
-  if (!type) return { saveType: "", saveDc: 15, saveOut: "half" };
+  if (!type) return { saveType: "", saveDc: 15, saveDcMode: "fixed", saveOut: "half" };
   return {
     saveType: type,
     saveDc: clampInt(e?.saveDc, 1, 60, 15),
+    // "auto" resolves the wielder's spell-or-class DC at display time, so the
+    // save follows whoever holds the weapon (verified: the system's inline
+    // check accepts resolve() and classOrSpellDC falls back to class DC).
+    saveDcMode: e?.saveDcMode === "auto" ? "auto" : "fixed",
     saveOut: e?.saveOut === "none" ? "none" : "half"
   };
 }
@@ -446,7 +450,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         value: per.number ?? 1,
         die: faces ? `d${faces}` : "",
         type: per.type ?? "bleed",
-        ...normalizeSave({ saveType: ps.type, saveDc: ps.dc, saveOut: ps.out })
+        ...normalizeSave({ saveType: ps.type, saveDc: ps.dc, saveDcMode: ps.mode, saveOut: ps.out })
       });
     }
     for (const r of src.rules ?? []) {
@@ -468,6 +472,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       const save = normalizeSave({
         saveType: r.sweSave?.type,
         saveDc: r.sweSave?.dc,
+        saveDcMode: r.sweSave?.mode,
         saveOut: r.sweSave?.out
       });
       if (r.key === "DamageDice") {
@@ -1095,11 +1100,15 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       if (!e.saveType) return;
       const basic = e.saveOut === "half" ? "|basic:true" : "";
       const clause = i18n(e.saveOut === "half" ? "NoteHalf" : "NoteNone");
+      const dcPart =
+        e.saveDcMode === "auto"
+          ? "resolve(@actor.attributes.classOrSpellDC.value)"
+          : e.saveDc;
       saveNotes.push({
         key: "Note",
         selector: "{item|id}-damage",
         title: `${condAmount(e)} ${tl}${suffix ? ` ${suffix}` : ""}${e.src ? ` · ${e.src}` : ""}`,
-        text: `@Check[type:${e.saveType}|dc:${e.saveDc}${basic}] — ${clause}`,
+        text: `@Check[type:${e.saveType}|dc:${dcPart}${basic}] — ${clause}`,
         label: `${SWE_MARK}N:`
       });
     };
@@ -1130,7 +1139,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         };
       }
       if (e.saveType) {
-        rule.sweSave = { type: e.saveType, dc: e.saveDc, out: e.saveOut };
+        rule.sweSave = { type: e.saveType, dc: e.saveDc, mode: e.saveDcMode, out: e.saveOut };
         mkSaveNote(e, tl, i18n("PersistentShort"));
       }
       return rule;
@@ -1162,7 +1171,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         if (splash) rule.damageCategory = "splash";
       }
       if (e.saveType) {
-        rule.sweSave = { type: e.saveType, dc: e.saveDc, out: e.saveOut };
+        rule.sweSave = { type: e.saveType, dc: e.saveDc, mode: e.saveDcMode, out: e.saveOut };
         mkSaveNote(e, tl, splash ? i18n("Splash").toLowerCase() : "");
       }
       return rule;
@@ -1252,7 +1261,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       "system.damage.persistent": persistent,
       "system.splashDamage.value": Number(d.splash) || 0,
       [`flags.${MODULE_ID}.persSave`]: firstPers?.saveType
-        ? { type: firstPers.saveType, dc: firstPers.saveDc, out: firstPers.saveOut }
+        ? { type: firstPers.saveType, dc: firstPers.saveDc, mode: firstPers.saveDcMode, out: firstPers.saveOut }
         : null,
       "system.runes.potency": Number(d.runes.potency) || 0,
       "system.runes.striking": Number(d.runes.striking) || 0,
