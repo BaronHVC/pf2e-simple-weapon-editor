@@ -377,3 +377,237 @@
 .swe-editor .swe-cond .swe-warning {
   margin: 6px 0 0;
 }
+
+/* ==== v0.8 visual refresh: blocks, cards, search ==== */
+.swe-editor .swe-block {
+  border: 1px solid #3d3d46;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.14);
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.swe-editor .swe-block-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.swe-editor .swe-block-title {
+  font-size: 0.72em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.swe-editor .swe-title-extra { color: #9fb0e8; }
+.swe-editor .swe-title-pers { color: #d08a8a; }
+.swe-editor .swe-block-note {
+  margin-left: auto;
+  font-size: 0.78em;
+  opacity: 0.7;
+}
+.swe-editor .swe-block-pers {
+  border-color: rgba(194, 91, 91, 0.4);
+  background: rgba(194, 91, 91, 0.06);
+}
+.swe-editor .swe-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.swe-editor .swe-ghostbtn {
+  align-self: flex-start;
+  width: auto !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: 1px dashed #5a5a64;
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 0.8em;
+  color: inherit;
+  opacity: 0.85;
+}
+.swe-editor .swe-ghostbtn:hover { opacity: 1; box-shadow: none; }
+.swe-editor .swe-ghost-extra { color: #9fb0e8; border-color: #5a6a94; }
+.swe-editor .swe-ghost-pers { color: #d08a8a; border-color: #a06a6a; }
+.swe-editor .swe-previewbar {
+  border: 1px solid #3d3d46;
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin: 4px 0 0;
+  font-size: 0.85em;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.swe-editor .swe-previewbar-label {
+  opacity: 0.6;
+  margin-right: 4px;
+}
+.swe-editor .swe-previewbar span { font-weight: 600; }
+
+/* Runas: meta + fichas */
+.swe-editor .swe-runes-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 8px 0 6px;
+}
+.swe-editor .swe-meta-over { font-size: 0.8em; font-weight: 700; color: #b3661a; }
+.swe-editor .swe-meta-ok { font-size: 0.8em; opacity: 0.7; }
+.swe-editor .swe-meta-gp { margin-left: auto; font-size: 0.8em; color: #2e8b57; }
+.swe-editor .swe-rune-card {
+  border: 1px solid rgba(216, 185, 94, 0.4);
+  border-radius: 6px;
+  background: rgba(216, 185, 94, 0.05);
+  padding: 6px 10px;
+  margin-bottom: 6px;
+}
+.swe-editor .swe-rune-card.over {
+  border-color: rgba(179, 102, 26, 0.65);
+  background: rgba(179, 102, 26, 0.08);
+}
+.swe-editor .swe-rune-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.swe-editor .swe-rune-name { font-weight: 600; font-size: 0.95em; }
+.swe-editor .swe-badge-lv {
+  font-size: 0.68em;
+  font-weight: 700;
+  color: #26262b;
+  background: #d8b95e;
+  border-radius: 3px;
+  padding: 1px 6px;
+}
+.swe-editor .swe-rune-price { font-size: 0.8em; opacity: 0.7; }
+.swe-editor .swe-rune-over { font-size: 0.78em; font-weight: 600; color: #b3661a; }
+.swe-editor .swe-rune-acts {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 10px;
+}
+.swe-editor .swe-rune-acts a { cursor: pointer; opacity: 0.65; }
+.swe-editor .swe-rune-acts a:hover { opacity: 1; }
+.swe-editor .swe-rune-card.open .swe-rune-acts a:first-child { opacity: 1; color: #9fb0e8; }
+.swe-editor .swe-rune-desc {
+  border-top: 1px solid rgba(216, 185, 94, 0.3);
+  margin-top: 6px;
+  padding-top: 6px;
+  font-size: 0.85em;
+  max-height: 170px;
+  overflow-y: auto;
+}
+.swe-editor .swe-rune-desc p { margin: 4px 0; }
+.swe-editor .swe-search {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Traits: frecuentes */
+.swe-editor .swe-freq { margin-top: 8px; }
+.swe-editor .swe-freq-label {
+  display: block;
+  font-size: 0.72em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.6;
+  margin-bottom: 4px;
+}
+.swe-editor .swe-ghostchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.82em;
+  padding: 2px 10px;
+  border-radius: 10px;
+  border: 1px dashed #5a5a64;
+  opacity: 0.75;
+  cursor: pointer;
+}
+.swe-editor .swe-ghostchip:hover { opacity: 1; text-shadow: none; }
+
+/* Condicionales: tarjetas por efecto */
+.swe-editor .swe-card {
+  border: 1px solid #3d3d46;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.14);
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.swe-editor .swe-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #3d3d46;
+}
+.swe-editor .swe-kind-heal .swe-card-head { background: rgba(78, 168, 106, 0.10); }
+.swe-editor .swe-kind-damage .swe-card-head { background: rgba(192, 98, 42, 0.10); }
+.swe-editor .swe-fx-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+.swe-editor .swe-kind-heal .swe-fx-icon {
+  color: #5fbe7e;
+  background: rgba(78, 168, 106, 0.16);
+  border: 1px solid rgba(78, 168, 106, 0.5);
+}
+.swe-editor .swe-kind-damage .swe-fx-icon {
+  color: #d4813a;
+  background: rgba(192, 98, 42, 0.16);
+  border: 1px solid rgba(192, 98, 42, 0.5);
+}
+.swe-editor .swe-card-head select {
+  width: auto !important;
+  min-width: 60px;
+  max-width: 175px;
+  flex: 1 1 auto;
+}
+.swe-editor .swe-fx-select { font-weight: 600; }
+.swe-editor .swe-card-amount {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+.swe-editor .swe-card-amount select { max-width: 70px; }
+.swe-editor .swe-card-head .swe-rowdel { flex: 0 0 auto; cursor: pointer; }
+.swe-editor .swe-card-body {
+  padding: 8px 10px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.swe-editor .swe-card-when {
+  font-size: 0.68em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.55;
+}
+.swe-editor .swe-card-body .swe-ghostchip { align-self: flex-start; }
+.swe-editor .swe-card .swe-cond-when {
+  flex-wrap: nowrap;
+  margin-bottom: 0;
+}
+.swe-editor .swe-card .swe-cond-when > select {
+  flex: 0 1 auto;
+  max-width: 200px;
+  min-width: 90px;
+}
+.swe-editor .swe-card .swe-cond-when > .swe-cond-target {
+  flex: 1 1 90px;
+}
+.swe-editor .swe-card .swe-cond-note { padding: 0 10px 8px; }

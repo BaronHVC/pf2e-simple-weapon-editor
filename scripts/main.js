@@ -187,16 +187,31 @@ function condLabel(choices, crit) {
   return hit ? hit.label : null;
 }
 
-// The target fields are search inputs backed by datalists, so what arrives from
-// the form is a label, not a slug. An exact label match (accent-insensitive,
-// for the es locale) resolves to its slug; anything else is kept slugified so
-// the row can flag it as unknown instead of silently dropping what was typed.
-function resolveCritInput(choices, filter, text) {
+// Search inputs backed by datalists hand the form a label, not a slug. An exact
+// label match (accent-insensitive, for the es locale) resolves to its value;
+// anything else comes back slugified so callers can flag it instead of silently
+// dropping what was typed.
+function resolveLabel(options, text) {
   const t = String(text ?? "").trim();
   if (!t) return "";
   const norm = (s) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  const hit = (choices?.[filter] ?? []).find((o) => norm(o.label) === norm(t));
+  const hit = (options ?? []).find((o) => norm(o.label) === norm(t));
   return hit ? hit.value : slugOf(t);
+}
+
+function resolveCritInput(choices, filter, text) {
+  return resolveLabel(choices?.[filter], text);
+}
+
+// One accent color per damage type, for the dots next to type selects and the
+// colored preview segments. Physical types stay neutral on purpose.
+const DMG_COLORS = {
+  fire: "#d4813a", cold: "#7fb0d4", acid: "#5fbe7e", electricity: "#d8b95e",
+  poison: "#9a7fc0", bleed: "#c25b5b", mental: "#c07fb0", sonic: "#7fc0b8",
+  force: "#8fa0e0", vitality: "#8fd4a0", void: "#8f7fa8", spirit: "#a8c0e8"
+};
+function dotFor(type) {
+  return DMG_COLORS[type] ?? "#b8b8c2";
 }
 
 function i18n(key) {
@@ -470,6 +485,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       sweRemoveRune: SimpleWeaponEditor.actRemoveRune,
       sweShowRune: SimpleWeaponEditor.actShowRune,
       sweAddTrait: SimpleWeaponEditor.actAddTrait,
+      sweQuickTrait: SimpleWeaponEditor.actQuickTrait,
       sweRemoveTrait: SimpleWeaponEditor.actRemoveTrait,
       sweAddCond: SimpleWeaponEditor.actAddCond,
       sweRemoveCond: SimpleWeaponEditor.actRemoveCond,
@@ -502,16 +518,28 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     const totalDice = (Number(d.damage.dice) || 1) + striking;
     const typeLabel = labelFor(cfg.damageTypes, d.damage.damageType);
     const overLimit = d.runes.property.length > potency;
-    let preview = `${potency > 0 ? `+${potency} ` : ""}${totalDice}${d.damage.die} ${typeLabel}`;
+    const previewParts = [
+      {
+        text: `${potency > 0 ? `+${potency} ` : ""}${totalDice}${d.damage.die} ${typeLabel}`,
+        color: dotFor(d.damage.damageType)
+      }
+    ];
     for (const e of d.extras) {
       const tl = labelFor(cfg.damageTypes, e.type);
-      preview += e.die ? ` + ${e.value}${e.die} ${tl}` : ` + ${e.value} ${tl}`;
+      previewParts.push({
+        text: e.die ? ` + ${e.value}${e.die} ${tl}` : ` + ${e.value} ${tl}`,
+        color: dotFor(e.type)
+      });
     }
     for (const p of d.persistents) {
       const pl = labelFor(cfg.damageTypes, p.type);
       const amount = p.die ? `${p.value}${p.die}` : `${p.value}`;
-      preview += ` + ${amount} ${pl} ${i18n("PersistentShort")}`;
+      previewParts.push({
+        text: ` + ${amount} ${pl} ${i18n("PersistentShort")}`,
+        color: dotFor(p.type)
+      });
     }
+    let preview = previewParts.map((x) => x.text).join("");
     const runeInfos = await Promise.all(
       d.runes.property.map((slug) => SimpleWeaponEditor.getRuneInfo(slug))
     );
@@ -533,6 +561,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       ...c,
       index: i,
       isDamage: c.effect === "damage",
+      kind: c.effect === "damage" ? "damage" : "heal",
       amount: condAmount(c),
       onlyOneCrit: c.criteria.length <= 1,
       criteria: c.criteria.map((crit, j) => {
@@ -551,6 +580,14 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     const derivedGp = Number(this.item.system?.price?.value?.gp ?? 0);
     const baseGp = Number(this.item._source.system?.price?.value?.gp ?? 0);
     const runesGp = Math.max(0, derivedGp - baseGp);
+    const traitOpts = locRecord(cfg.weaponTraits);
+    const runeOpts = locRecord(propertyRuneRecord());
+    // Quick-add chips for the traits tab: common picks that exist in this
+    // system's record and are not already on the weapon.
+    const freqTraits = ["agile", "finesse", "reach", "trip", "twin", "versatile-p", "versatile-s", "thrown-10"]
+      .map((slug) => traitOpts.find((o) => o.value === slug))
+      .filter((o) => o && !d.traits.includes(o.value))
+      .slice(0, 6);
     return {
       data: d,
       img: this.item.img,
@@ -558,8 +595,8 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       runesGp,
       dies: DIES,
       damageTypes: locRecord(cfg.damageTypes),
-      weaponTraits: locRecord(cfg.weaponTraits),
-      propertyRunes: locRecord(propertyRuneRecord()),
+      weaponTraits: traitOpts,
+      propertyRunes: runeOpts,
       potencyOptions: [0, 1, 2, 3, 4],
       strikingOptions: [
         { value: 0, label: "—" },
@@ -567,12 +604,22 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         { value: 2, label: i18n("Striking2") },
         { value: 3, label: i18n("Striking3") }
       ],
-      extrasIndexed: d.extras.map((e, i) => ({ ...e, index: i })),
-      persIndexed: d.persistents.map((e, i) => ({ ...e, index: i })),
-      runesResolved: d.runes.property.map((slug) => ({
-        slug,
-        label: labelFor(propertyRuneRecord(), slug)
-      })),
+      extrasIndexed: d.extras.map((e, i) => ({ ...e, index: i, dot: dotFor(e.type) })),
+      persIndexed: d.persistents.map((e, i) => ({ ...e, index: i, dot: dotFor(e.type) })),
+      runesResolved: d.runes.property.map((slug, i) => {
+        const ri = runeInfos[i] ?? {};
+        return {
+          slug,
+          label: labelFor(propertyRuneRecord(), slug),
+          level: ri.level ?? null,
+          price: ri.price ?? null,
+          descHTML: ri.descHTML ?? null,
+          // Slots are potency: entries past that count are the ones the limit
+          // warning is about, so they get marked card by card.
+          over: i >= potency,
+          selected: slug === this.selectedRune
+        };
+      }),
       traitsResolved: d.traits.map((slug) => ({
         slug,
         label: labelFor(cfg.weaponTraits, slug)
@@ -582,10 +629,11 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       // One shared datalist per filter type instead of options per row. The feat
       // list is in the thousands, so its datalist starts empty and is filled
       // with the top matches while the user types (see _onRender).
-      datalists: ["ancestry", "heritage", "class"].map((k) => ({
-        key: k,
-        options: choices[k] ?? []
-      })),
+      datalists: [
+        ...["ancestry", "heritage", "class"].map((k) => ({ key: k, options: choices[k] ?? [] })),
+        { key: "rune", options: runeOpts },
+        { key: "trait", options: traitOpts }
+      ],
       filterOptions: COND_FILTERS.map((f) => ({
         value: f,
         label: i18n(`Filter_${f}`)
@@ -595,6 +643,10 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         label: i18n(`Effect_${e}`)
       })),
       preview,
+      previewParts,
+      baseDot: dotFor(d.damage.damageType),
+      baseNote: striking > 0 ? `${totalDice}${d.damage.die}` : null,
+      freqTraits,
       critPreview,
       overLimit,
       potency,
@@ -663,14 +715,6 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
           crit.filter = el.value;
           crit.slug = "";
         }
-        this.render();
-      });
-    }
-    const runeSel = form.querySelector('[name="runeToAdd"]');
-    if (runeSel) {
-      runeSel.addEventListener("change", () => {
-        this.syncFromForm();
-        this.selectedRune = runeSel.value || null;
         this.render();
       });
     }
@@ -773,8 +817,16 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
   static actAddRune(event, target) {
     this.syncFromForm();
     const sel = this.element.querySelector('[name="runeToAdd"]');
-    const slug = sel?.value;
-    if (slug && !this.data.runes.property.includes(slug)) {
+    const opts = locRecord(propertyRuneRecord());
+    const slug = resolveLabel(opts, sel?.value);
+    // Unlike traits, an invented rune slug means a rule the system cannot
+    // price or apply, so only known runes get through.
+    if (!slug || !opts.some((o) => o.value === slug)) {
+      if (sel?.value) ui.notifications.warn(i18n("PickRune"));
+      this.render();
+      return;
+    }
+    if (!this.data.runes.property.includes(slug)) {
       this.data.runes.property.push(slug);
       this.selectedRune = slug;
     }
@@ -783,7 +835,8 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
 
   static actShowRune(event, target) {
     this.syncFromForm();
-    this.selectedRune = target?.dataset?.slug ?? null;
+    const slug = target?.dataset?.slug ?? null;
+    this.selectedRune = this.selectedRune === slug ? null : slug;
     this.render();
   }
 
@@ -797,7 +850,17 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
   static actAddTrait(event, target) {
     this.syncFromForm();
     const sel = this.element.querySelector('[name="traitToAdd"]');
-    const slug = sel?.value;
+    const slug = resolveLabel(locRecord((CONFIG.PF2E ?? {}).weaponTraits), sel?.value);
+    if (slug && !this.data.traits.includes(slug)) {
+      this.data.traits.push(slug);
+      this.data.traits.sort();
+    }
+    this.render();
+  }
+
+  static actQuickTrait(event, target) {
+    this.syncFromForm();
+    const slug = target?.dataset?.slug;
     if (slug && !this.data.traits.includes(slug)) {
       this.data.traits.push(slug);
       this.data.traits.sort();
