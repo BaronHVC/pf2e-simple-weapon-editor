@@ -40,7 +40,7 @@
           <option value="{{this}}" {{#if (sweEq this ../data.damage.die)}}selected{{/if}}>{{this}}</option>
           {{/each}}
         </select>
-        <span class="swe-dot" style="background: {{baseDot}}"></span>
+        <i class="swe-dmgicon fa-solid {{baseIcon}}" style="color: {{baseDot}}"></i>
         <select name="damage.damageType">
           {{#each damageTypes}}
           <option value="{{this.value}}" {{#if (sweEq this.value ../data.damage.damageType)}}selected{{/if}}>{{this.label}}</option>
@@ -62,7 +62,7 @@
           <option value="{{this}}" {{#if (sweEq this ../this.die)}}selected{{/if}}>{{this}}</option>
           {{/each}}
         </select>
-        <span class="swe-dot" style="background: {{this.dot}}"></span>
+        <i class="swe-dmgicon fa-solid {{this.icon}}" style="color: {{this.dot}}"></i>
         <select name="extras.{{this.index}}.type">
           {{#each ../damageTypes}}
           <option value="{{this.value}}" {{#if (sweEq this.value ../this.type)}}selected{{/if}}>{{this.label}}</option>
@@ -89,7 +89,7 @@
           <option value="{{this}}" {{#if (sweEq this ../this.die)}}selected{{/if}}>{{this}}</option>
           {{/each}}
         </select>
-        <span class="swe-dot" style="background: {{this.dot}}"></span>
+        <i class="swe-dmgicon fa-solid {{this.icon}}" style="color: {{this.dot}}"></i>
         <select name="pers.{{this.index}}.type">
           {{#each ../damageTypes}}
           <option value="{{this.value}}" {{#if (sweEq this.value ../this.type)}}selected{{/if}}>{{this.label}}</option>
@@ -213,6 +213,7 @@
           {{/each}}
         </select>
         {{#if this.isDamage}}
+        <i class="swe-dmgicon fa-solid {{this.icon}}" style="color: {{this.dot}}"></i>
         <select name="conds.{{this.index}}.type">
           {{#each ../damageTypes}}
           <option value="{{this.value}}" {{#if (sweEq this.value ../type)}}selected{{/if}}>{{this.label}}</option>

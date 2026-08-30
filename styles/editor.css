@@ -611,3 +611,27 @@
   flex: 1 1 90px;
 }
 .swe-editor .swe-card .swe-cond-note { padding: 0 10px 8px; }
+
+/* Iconos por tipo de danio */
+.swe-editor .swe-dmgicon {
+  width: 16px;
+  text-align: center;
+  font-size: 0.85em;
+  flex: 0 0 auto;
+}
+
+/* La flecha nativa del datalist se dibuja rota sobre el tema oscuro; se oculta
+   y una lupa sutil ocupa su lugar como pista de "escribi para buscar". */
+.swe-editor .swe-search::-webkit-calendar-picker-indicator,
+.swe-editor .swe-cond-target::-webkit-calendar-picker-indicator {
+  display: none !important;
+  opacity: 0;
+}
+.swe-editor .swe-search,
+.swe-editor .swe-cond-target {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239a9aa4' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='8'/><line x1='21' y1='21' x2='16.65' y2='16.65'/></svg>");
+  background-repeat: no-repeat;
+  background-position: 8px center;
+  background-size: 12px 12px;
+  padding-left: 26px !important;
+}

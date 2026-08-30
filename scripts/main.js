@@ -214,6 +214,19 @@ function dotFor(type) {
   return DMG_COLORS[type] ?? "#b8b8c2";
 }
 
+// Font Awesome glyph per damage type (Foundry ships FA solid). Anything not
+// listed - homebrew types included - falls back to a generic asterisk.
+const DMG_ICONS = {
+  fire: "fa-fire", cold: "fa-snowflake", acid: "fa-flask", electricity: "fa-bolt",
+  poison: "fa-skull-crossbones", bleed: "fa-droplet", mental: "fa-brain",
+  sonic: "fa-volume-high", force: "fa-burst", vitality: "fa-sun", void: "fa-moon",
+  spirit: "fa-ghost", slashing: "fa-slash", piercing: "fa-syringe",
+  bludgeoning: "fa-hammer"
+};
+function iconFor(type) {
+  return DMG_ICONS[type] ?? "fa-asterisk";
+}
+
 function i18n(key) {
   return game.i18n.localize(`SWE.${key}`);
 }
@@ -562,6 +575,8 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       index: i,
       isDamage: c.effect === "damage",
       kind: c.effect === "damage" ? "damage" : "heal",
+      dot: dotFor(c.type),
+      icon: iconFor(c.type),
       amount: condAmount(c),
       onlyOneCrit: c.criteria.length <= 1,
       criteria: c.criteria.map((crit, j) => {
@@ -604,8 +619,8 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         { value: 2, label: i18n("Striking2") },
         { value: 3, label: i18n("Striking3") }
       ],
-      extrasIndexed: d.extras.map((e, i) => ({ ...e, index: i, dot: dotFor(e.type) })),
-      persIndexed: d.persistents.map((e, i) => ({ ...e, index: i, dot: dotFor(e.type) })),
+      extrasIndexed: d.extras.map((e, i) => ({ ...e, index: i, dot: dotFor(e.type), icon: iconFor(e.type) })),
+      persIndexed: d.persistents.map((e, i) => ({ ...e, index: i, dot: dotFor(e.type), icon: iconFor(e.type) })),
       runesResolved: d.runes.property.map((slug, i) => {
         const ri = runeInfos[i] ?? {};
         return {
@@ -645,6 +660,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       preview,
       previewParts,
       baseDot: dotFor(d.damage.damageType),
+      baseIcon: iconFor(d.damage.damageType),
       baseNote: striking > 0 ? `${totalDice}${d.damage.die}` : null,
       freqTraits,
       critPreview,
