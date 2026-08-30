@@ -439,7 +439,15 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     const splashes = [];
     if (per) {
       const faces = Number(per.faces) || null;
-      persistents.push({ value: per.number ?? 1, die: faces ? `d${faces}` : "", type: per.type ?? "bleed" });
+      // The native persistent field cannot carry a save config, so the first
+      // entry's lives in the module flag; rule-based entries carry their own.
+      const ps = item._source.flags?.[MODULE_ID]?.persSave ?? {};
+      persistents.push({
+        value: per.number ?? 1,
+        die: faces ? `d${faces}` : "",
+        type: per.type ?? "bleed",
+        ...normalizeSave({ saveType: ps.type, saveDc: ps.dc, saveOut: ps.out })
+      });
     }
     for (const r of src.rules ?? []) {
       if (!isSweRule(r)) continue;
@@ -868,7 +876,8 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
           value: Number(e.value) || 1,
           die: e.die ?? "",
           type: e.type ?? "bleed",
-          src: String(e.src ?? "").trim()
+          src: String(e.src ?? "").trim(),
+          ...normalizeSave(e)
         });
       }
       d.persistents = arr;
@@ -929,7 +938,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
 
   static actAddPersistent(event, target) {
     this.syncFromForm();
-    this.data.persistents.push({ value: 1, die: "", type: "bleed", src: "" });
+    this.data.persistents.push({ value: 1, die: "", type: "bleed", src: "", ...normalizeSave({}) });
     this.render();
   }
 
@@ -1079,10 +1088,29 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       const auto = e.die ? `+${Number(e.value) || 1}${e.die} ${tl}` : `+${Number(e.value) || 1} ${tl}`;
       return `${mark} ${e.src || auto}`;
     };
+    // Entries with a save emit a companion Note so the damage card carries the
+    // system's clickable @Check; regenerated every save, never read back.
+    const saveNotes = [];
+    const mkSaveNote = (e, tl, suffix) => {
+      if (!e.saveType) return;
+      const basic = e.saveOut === "half" ? "|basic:true" : "";
+      const clause = i18n(e.saveOut === "half" ? "NoteHalf" : "NoteNone");
+      saveNotes.push({
+        key: "Note",
+        selector: "{item|id}-damage",
+        title: `${condAmount(e)} ${tl}${suffix ? ` ${suffix}` : ""}${e.src ? ` · ${e.src}` : ""}`,
+        text: `@Check[type:${e.saveType}|dc:${e.saveDc}${basic}] — ${clause}`,
+        label: `${SWE_MARK}N:`
+      });
+    };
+    if (firstPers?.saveType) {
+      mkSaveNote(firstPers, labelFor(cfg.damageTypes, firstPers.type), i18n("PersistentShort"));
+    }
     const persRules = d.persistents.slice(1).map((e) => {
       const tl = labelFor(cfg.damageTypes, e.type);
+      let rule;
       if (e.die) {
-        return {
+        rule = {
           key: "DamageDice",
           selector: "{item|id}-damage",
           diceNumber: Number(e.value) || 1,
@@ -1091,20 +1119,25 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
           category: "persistent",
           label: mkLabel(SWE_PERS, e, tl)
         };
+      } else {
+        rule = {
+          key: "FlatModifier",
+          selector: "{item|id}-damage",
+          value: Number(e.value) || 1,
+          damageType: e.type,
+          damageCategory: "persistent",
+          label: mkLabel(SWE_PERS, e, tl)
+        };
       }
-      return {
-        key: "FlatModifier",
-        selector: "{item|id}-damage",
-        value: Number(e.value) || 1,
-        damageType: e.type,
-        damageCategory: "persistent",
-        label: mkLabel(SWE_PERS, e, tl)
-      };
+      if (e.saveType) {
+        rule.sweSave = { type: e.saveType, dc: e.saveDc, out: e.saveOut };
+        mkSaveNote(e, tl, i18n("PersistentShort"));
+      }
+      return rule;
     });
     // Entries with a save also emit a companion Note: the damage card then
     // carries the system's own clickable @Check button, and the table applies
     // full, half or none with the card's standard buttons.
-    const saveNotes = [];
     const mkDamageRule = (e, splash) => {
       const tl = labelFor(cfg.damageTypes, e.type);
       let rule;
@@ -1130,15 +1163,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       }
       if (e.saveType) {
         rule.sweSave = { type: e.saveType, dc: e.saveDc, out: e.saveOut };
-        const basic = e.saveOut === "half" ? "|basic:true" : "";
-        const clause = i18n(e.saveOut === "half" ? "NoteHalf" : "NoteNone");
-        saveNotes.push({
-          key: "Note",
-          selector: "{item|id}-damage",
-          title: `${condAmount(e)} ${tl}${e.src ? ` · ${e.src}` : ""}`,
-          text: `@Check[type:${e.saveType}|dc:${e.saveDc}${basic}] — ${clause}`,
-          label: `${SWE_MARK}N:`
-        });
+        mkSaveNote(e, tl, splash ? i18n("Splash").toLowerCase() : "");
       }
       return rule;
     };
@@ -1226,6 +1251,9 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       "system.damage.damageType": d.damage.damageType,
       "system.damage.persistent": persistent,
       "system.splashDamage.value": Number(d.splash) || 0,
+      [`flags.${MODULE_ID}.persSave`]: firstPers?.saveType
+        ? { type: firstPers.saveType, dc: firstPers.saveDc, out: firstPers.saveOut }
+        : null,
       "system.runes.potency": Number(d.runes.potency) || 0,
       "system.runes.striking": Number(d.runes.striking) || 0,
       "system.runes.property": [...d.runes.property],

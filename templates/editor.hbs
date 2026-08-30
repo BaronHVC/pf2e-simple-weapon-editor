@@ -165,6 +165,19 @@
           <option value="{{this.value}}" {{#if (sweEq this.value ../this.type)}}selected{{/if}}>{{this.label}}</option>
           {{/each}}
         </select>
+        <select name="pers.{{this.index}}.saveType" class="swe-cat" title="{{localize 'SWE.SaveTitle'}}">
+          <option value="" {{#unless this.saveType}}selected{{/unless}}>&mdash;</option>
+          {{#each ../saveOptions}}
+          <option value="{{this.value}}" {{#if (sweEq this.value ../saveType)}}selected{{/if}}>{{this.label}}</option>
+          {{/each}}
+        </select>
+        {{#if this.saveType}}
+        <input type="number" name="pers.{{this.index}}.saveDc" value="{{this.saveDc}}" min="1" max="60" step="1" class="swe-narrow" title="{{localize 'SWE.SaveDC'}}" />
+        <select name="pers.{{this.index}}.saveOut" class="swe-cat">
+          <option value="half" {{#if (sweEq this.saveOut 'half')}}selected{{/if}}>{{localize "SWE.SaveHalf"}}</option>
+          <option value="none" {{#if (sweEq this.saveOut 'none')}}selected{{/if}}>{{localize "SWE.SaveNone"}}</option>
+        </select>
+        {{/if}}
         <input type="text" name="pers.{{this.index}}.src" value="{{this.src}}" placeholder="{{localize 'SWE.SourcePh'}}" class="swe-src" />
         <a class="swe-rowdel" data-action="sweRemovePersistent" data-index="{{this.index}}" title="{{localize 'SWE.Remove'}}"><i class="fa-solid fa-trash"></i></a>
       </div>
