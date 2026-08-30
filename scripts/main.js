@@ -1123,7 +1123,9 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       saveNotes.push({
         key: "Note",
         selector: "{item|id}-damage",
-        title: `${condAmount(e)} ${tl}${suffix}${e.src ? ` · ${e.src}` : ""}`,
+        // Titled as separate on purpose: the note renders inside the damage
+        // card, and without the marker it reads as part of that roll.
+        title: `${i18n("Independent")} · ${condAmount(e)} ${tl}${suffix}${e.src ? ` · ${e.src}` : ""}`,
         text: `@Check[type:${e.saveType}|dc:${dcPart}${basic}] @Damage[(${roll})[${dmgType}]] — ${clause}`,
         label: `${SWE_MARK}N:`
       });

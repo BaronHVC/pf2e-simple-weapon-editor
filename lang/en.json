@@ -58,6 +58,7 @@
   "SWE.SaveHalf": "half on save",
   "SWE.SaveNone": "none on save",
   "SWE.SaveShort": "save",
+  "SWE.Independent": "Separate save",
   "SWE.AutoSaves": "Saves resolved",
   "SWE.Applied": "applied",
   "SWE.Resisted": "resisted",
