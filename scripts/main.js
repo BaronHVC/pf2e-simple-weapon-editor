@@ -104,6 +104,19 @@ function normalizeCond(c) {
   return base;
 }
 
+// A damage entry can demand a save. The config rides on the entry's own rule
+// as sweSave (verified: the system stores unknown keys and still applies the
+// rule), and a companion Note rule renders the @Check button on damage cards.
+function normalizeSave(e) {
+  const type = String(e?.saveType ?? "").trim();
+  if (!type) return { saveType: "", saveDc: 15, saveOut: "half" };
+  return {
+    saveType: type,
+    saveDc: clampInt(e?.saveDc, 1, 60, 15),
+    saveOut: e?.saveOut === "none" ? "none" : "half"
+  };
+}
+
 function condAmount(c) {
   return c.die ? `${c.value}${c.die}` : `${c.value}`;
 }
@@ -423,6 +436,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     const per = src.damage?.persistent;
     const extras = [];
     const persistents = [];
+    const splashes = [];
     if (per) {
       const faces = Number(per.faces) || null;
       persistents.push({ value: per.number ?? 1, die: faces ? `d${faces}` : "", type: per.type ?? "bleed" });
@@ -433,35 +447,43 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       // back as plain extra damage and duplicated on the next save. Conditionals
       // are rebuilt from the flag, never from these rules.
       if (isCondRule(r)) continue;
+      // Companion notes are output only, regenerated from each entry's save
+      // config on save; parsing them back would duplicate entries.
+      if (r.key === "Note") continue;
       const isPers = r.label.startsWith(SWE_PERS);
       const bucket = isPers ? persistents : extras;
       const mark = isPers ? SWE_PERS : SWE_MARK;
       let srcLabel = r.label.slice(mark.length).trim();
       if (AUTO_LABEL_RE.test(srcLabel)) srcLabel = "";
-      const category = r.category === "splash" || r.damageCategory === "splash" ? "splash" : "";
+      const isSplash = r.category === "splash" || r.damageCategory === "splash";
+      const dest = isPers ? bucket : isSplash ? splashes : bucket;
+      const save = normalizeSave({
+        saveType: r.sweSave?.type,
+        saveDc: r.sweSave?.dc,
+        saveOut: r.sweSave?.out
+      });
       if (r.key === "DamageDice") {
-        bucket.push({
+        dest.push({
           value: r.diceNumber ?? 1,
           die: r.dieSize ?? "d6",
           type: r.damageType ?? "fire",
           src: srcLabel,
-          category
+          ...save
         });
       } else if (r.key === "FlatModifier") {
-        bucket.push({
+        dest.push({
           value: r.value ?? 1,
           die: "",
           type: r.damageType ?? "fire",
           src: srcLabel,
-          category
+          ...save
         });
       }
     }
     const rawDie = src.damage?.die ?? "d4";
-    for (const e of extras) {
+    for (const e of [...extras, ...splashes]) {
       e.value = clampInt(e.value, 1, 99, 1);
       if (e.die && !DIES.includes(e.die)) e.die = "d6";
-      e.category = e.category === "splash" ? "splash" : "";
     }
     for (const e of persistents) {
       e.value = clampInt(e.value, 1, 99, 1);
@@ -479,6 +501,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       },
       splash: clampInt(src.splashDamage?.value, 0, 99, 0),
       extras,
+      splashes,
       persistents,
       runes: {
         potency: clampInt(src.runes?.potency, 0, 4, 0),
@@ -504,6 +527,8 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     actions: {
       sweAddDamage: SimpleWeaponEditor.actAddDamage,
       sweRemoveDamage: SimpleWeaponEditor.actRemoveDamage,
+      sweAddSplash: SimpleWeaponEditor.actAddSplash,
+      sweRemoveSplash: SimpleWeaponEditor.actRemoveSplash,
       sweAddPersistent: SimpleWeaponEditor.actAddPersistent,
       sweRemovePersistent: SimpleWeaponEditor.actRemovePersistent,
       sweAddRune: SimpleWeaponEditor.actAddRune,
@@ -554,9 +579,15 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     ];
     for (const e of d.extras) {
       const tl = labelFor(cfg.damageTypes, e.type);
-      const cat = e.category === "splash" ? ` ${i18n("Splash").toLowerCase()}` : "";
       previewParts.push({
-        text: (e.die ? ` + ${e.value}${e.die} ${tl}` : ` + ${e.value} ${tl}`) + cat,
+        text: e.die ? ` + ${e.value}${e.die} ${tl}` : ` + ${e.value} ${tl}`,
+        color: dotFor(e.type)
+      });
+    }
+    for (const e of d.splashes) {
+      const tl = labelFor(cfg.damageTypes, e.type);
+      previewParts.push({
+        text: ` + ${condAmount(e)} ${tl} ${i18n("Splash").toLowerCase()}`,
         color: dotFor(e.type)
       });
     }
@@ -659,6 +690,15 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         { value: 3, label: i18n("Striking3") }
       ],
       extrasIndexed: d.extras.map((e, i) => ({ ...e, index: i, dot: dotFor(e.type), icon: iconFor(e.type) })),
+      splashIndexed: d.splashes.map((e, i) => ({ ...e, index: i, dot: dotFor(e.type), icon: iconFor(e.type) })),
+      saveOptions: [
+        ...locRecord(cfg.saves),
+        { value: "perception", label: game.i18n.localize("PF2E.PerceptionLabel") },
+        ...Object.entries(cfg.skills ?? {}).map(([k, v]) => ({
+          value: k,
+          label: game.i18n.localize(v?.label ?? k)
+        }))
+      ],
       dmgCondRows,
       persIndexed: d.persistents.map((e, i) => ({ ...e, index: i, dot: dotFor(e.type), icon: iconFor(e.type) })),
       runesResolved: d.runes.property.map((slug, i) => {
@@ -801,10 +841,24 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
           die: e.die ?? "",
           type: e.type ?? "fire",
           src: String(e.src ?? "").trim(),
-          category: e.category === "splash" ? "splash" : ""
+          ...normalizeSave(e)
         });
       }
       d.extras = arr;
+    }
+    if (o.splashes) {
+      const arr = [];
+      for (const k of Object.keys(o.splashes).sort((a, b) => Number(a) - Number(b))) {
+        const e = o.splashes[k] ?? {};
+        arr.push({
+          value: Number(e.value) || 1,
+          die: e.die ?? "",
+          type: e.type ?? "fire",
+          src: String(e.src ?? "").trim(),
+          ...normalizeSave(e)
+        });
+      }
+      d.splashes = arr;
     }
     if (o.pers) {
       const arr = [];
@@ -849,7 +903,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
 
   static actAddDamage(event, target) {
     this.syncFromForm();
-    this.data.extras.push({ value: 1, die: "d6", type: "fire", src: "", category: "" });
+    this.data.extras.push({ value: 1, die: "d6", type: "fire", src: "", ...normalizeSave({}) });
     this.render();
   }
 
@@ -857,6 +911,19 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     this.syncFromForm();
     const idx = Number(target?.dataset?.index);
     this.data.extras = this.data.extras.filter((e, i) => i !== idx);
+    this.render();
+  }
+
+  static actAddSplash(event, target) {
+    this.syncFromForm();
+    this.data.splashes.push({ value: 1, die: "", type: "fire", src: "", ...normalizeSave({}) });
+    this.render();
+  }
+
+  static actRemoveSplash(event, target) {
+    this.syncFromForm();
+    const idx = Number(target?.dataset?.index);
+    this.data.splashes = this.data.splashes.filter((e, i) => i !== idx);
     this.render();
   }
 
@@ -1034,11 +1101,15 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         label: mkLabel(SWE_PERS, e, tl)
       };
     });
-    const sweRules = d.extras.map((e) => {
+    // Entries with a save also emit a companion Note: the damage card then
+    // carries the system's own clickable @Check button, and the table applies
+    // full, half or none with the card's standard buttons.
+    const saveNotes = [];
+    const mkDamageRule = (e, splash) => {
       const tl = labelFor(cfg.damageTypes, e.type);
-      const splash = e.category === "splash";
+      let rule;
       if (e.die) {
-        const rule = {
+        rule = {
           key: "DamageDice",
           selector: "{item|id}-damage",
           diceNumber: Number(e.value) || 1,
@@ -1047,18 +1118,35 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
           label: mkLabel(SWE_MARK, e, tl)
         };
         if (splash) rule.category = "splash";
-        return rule;
+      } else {
+        rule = {
+          key: "FlatModifier",
+          selector: "{item|id}-damage",
+          value: Number(e.value) || 1,
+          damageType: e.type,
+          label: mkLabel(SWE_MARK, e, tl)
+        };
+        if (splash) rule.damageCategory = "splash";
       }
-      const rule = {
-        key: "FlatModifier",
-        selector: "{item|id}-damage",
-        value: Number(e.value) || 1,
-        damageType: e.type,
-        label: mkLabel(SWE_MARK, e, tl)
-      };
-      if (splash) rule.damageCategory = "splash";
+      if (e.saveType) {
+        rule.sweSave = { type: e.saveType, dc: e.saveDc, out: e.saveOut };
+        const basic = e.saveOut === "half" ? "|basic:true" : "";
+        const clause = i18n(e.saveOut === "half" ? "NoteHalf" : "NoteNone");
+        saveNotes.push({
+          key: "Note",
+          selector: "{item|id}-damage",
+          title: `${condAmount(e)} ${tl}${e.src ? ` · ${e.src}` : ""}`,
+          text: `@Check[type:${e.saveType}|dc:${e.saveDc}${basic}] — ${clause}`,
+          label: `${SWE_MARK}N:`
+        });
+      }
       return rule;
-    });
+    };
+    const sweRules = [
+      ...d.extras.map((e) => mkDamageRule(e, false)),
+      ...d.splashes.map((e) => mkDamageRule(e, true)),
+      ...saveNotes
+    ];
     // Splash without its trait does nothing, so setting an amount brings the
     // trait along; the trait alone is left to the user (it may be there for
     // other reasons, so clearing the amount never removes it).

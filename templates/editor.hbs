@@ -76,10 +76,19 @@
           <option value="{{this.value}}" {{#if (sweEq this.value ../this.type)}}selected{{/if}}>{{this.label}}</option>
           {{/each}}
         </select>
-        <select name="extras.{{this.index}}.category" class="swe-cat" title="{{localize 'SWE.SplashHint'}}">
-          <option value="" {{#unless this.category}}selected{{/unless}}>&mdash;</option>
-          <option value="splash" {{#if (sweEq this.category 'splash')}}selected{{/if}}>{{localize "SWE.Splash"}}</option>
+        <select name="extras.{{this.index}}.saveType" class="swe-cat" title="{{localize 'SWE.SaveTitle'}}">
+          <option value="" {{#unless this.saveType}}selected{{/unless}}>&mdash;</option>
+          {{#each ../saveOptions}}
+          <option value="{{this.value}}" {{#if (sweEq this.value ../saveType)}}selected{{/if}}>{{this.label}}</option>
+          {{/each}}
         </select>
+        {{#if this.saveType}}
+        <input type="number" name="extras.{{this.index}}.saveDc" value="{{this.saveDc}}" min="1" max="60" step="1" class="swe-narrow" title="{{localize 'SWE.SaveDC'}}" />
+        <select name="extras.{{this.index}}.saveOut" class="swe-cat">
+          <option value="half" {{#if (sweEq this.saveOut 'half')}}selected{{/if}}>{{localize "SWE.SaveHalf"}}</option>
+          <option value="none" {{#if (sweEq this.saveOut 'none')}}selected{{/if}}>{{localize "SWE.SaveNone"}}</option>
+        </select>
+        {{/if}}
         <input type="text" name="extras.{{this.index}}.src" value="{{this.src}}" placeholder="{{localize 'SWE.SourcePh'}}" class="swe-src" />
         <a class="swe-rowdel" data-action="sweRemoveDamage" data-index="{{this.index}}" title="{{localize 'SWE.Remove'}}"><i class="fa-solid fa-trash"></i></a>
       </div>
@@ -94,6 +103,46 @@
       </div>
       {{/each}}
       <button type="button" data-action="sweAddDamage" class="swe-ghostbtn swe-ghost-extra"><i class="fa-solid fa-plus"></i> {{localize "SWE.Extra"}}</button>
+    </div>
+
+    <div class="swe-block swe-block-splash">
+      <div class="swe-block-head">
+        <span class="swe-block-title swe-title-splash"><i class="fa-solid fa-burst"></i> {{localize "SWE.SplashHead"}}</span>
+        <span class="swe-block-note">{{localize "SWE.SplashBlockHint"}}</span>
+      </div>
+      {{#each splashIndexed}}
+      <div class="swe-row">
+        <input type="number" name="splashes.{{this.index}}.value" value="{{this.value}}" min="1" max="99" step="1" class="swe-narrow" />
+        <select name="splashes.{{this.index}}.die">
+          <option value="" {{#unless this.die}}selected{{/unless}}>{{localize "SWE.Fixed"}}</option>
+          {{#each ../dies}}
+          <option value="{{this}}" {{#if (sweEq this ../this.die)}}selected{{/if}}>{{this}}</option>
+          {{/each}}
+        </select>
+        <i class="swe-dmgicon fa-solid {{this.icon}}" style="color: {{this.dot}}"></i>
+        <select name="splashes.{{this.index}}.type">
+          {{#each ../damageTypes}}
+          <option value="{{this.value}}" {{#if (sweEq this.value ../this.type)}}selected{{/if}}>{{this.label}}</option>
+          {{/each}}
+        </select>
+        <select name="splashes.{{this.index}}.saveType" class="swe-cat" title="{{localize 'SWE.SaveTitle'}}">
+          <option value="" {{#unless this.saveType}}selected{{/unless}}>&mdash;</option>
+          {{#each ../saveOptions}}
+          <option value="{{this.value}}" {{#if (sweEq this.value ../saveType)}}selected{{/if}}>{{this.label}}</option>
+          {{/each}}
+        </select>
+        {{#if this.saveType}}
+        <input type="number" name="splashes.{{this.index}}.saveDc" value="{{this.saveDc}}" min="1" max="60" step="1" class="swe-narrow" title="{{localize 'SWE.SaveDC'}}" />
+        <select name="splashes.{{this.index}}.saveOut" class="swe-cat">
+          <option value="half" {{#if (sweEq this.saveOut 'half')}}selected{{/if}}>{{localize "SWE.SaveHalf"}}</option>
+          <option value="none" {{#if (sweEq this.saveOut 'none')}}selected{{/if}}>{{localize "SWE.SaveNone"}}</option>
+        </select>
+        {{/if}}
+        <input type="text" name="splashes.{{this.index}}.src" value="{{this.src}}" placeholder="{{localize 'SWE.SourcePh'}}" class="swe-src" />
+        <a class="swe-rowdel" data-action="sweRemoveSplash" data-index="{{this.index}}" title="{{localize 'SWE.Remove'}}"><i class="fa-solid fa-trash"></i></a>
+      </div>
+      {{/each}}
+      <button type="button" data-action="sweAddSplash" class="swe-ghostbtn swe-ghost-splash"><i class="fa-solid fa-plus"></i> {{localize "SWE.Splash"}}</button>
     </div>
 
     <div class="swe-block swe-block-pers">

@@ -684,3 +684,10 @@
   flex: 0 0 auto;
   cursor: pointer;
 }
+
+.swe-editor .swe-block-splash {
+  border-color: rgba(127, 176, 212, 0.4);
+  background: rgba(127, 176, 212, 0.05);
+}
+.swe-editor .swe-title-splash { color: #7fb0d4; }
+.swe-editor .swe-ghost-splash { color: #7fb0d4; border-color: #5a7a94; }
