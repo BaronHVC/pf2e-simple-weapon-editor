@@ -1378,6 +1378,10 @@ async function runHealing(actor, timing, { itemId = null } = {}) {
   if (!isSoleExecutor()) return;
   const entries = healEntriesFor(actor, timing, itemId);
   if (!entries.length) return;
+  // Healing a full-health wielder posted a pointless roll plus the system's
+  // "already at full health" card on every hit; stay quiet instead.
+  const hpNow = actor.system?.attributes?.hp;
+  if (hpNow && Number(hpNow.value) >= Number(hpNow.max)) return;
   // All matching entries roll together as one real roll message, so the dice
   // are seen being thrown (and 3D dice modules animate them). The system's own
   // "healed for X" card is the receipt, so no extra text message is posted.
@@ -1473,14 +1477,23 @@ async function runGatedSaves(attacker, item, message) {
       continue;
     }
     let dos;
+    let rollTotal = null;
     try {
-      const roll = await stat.roll({ dc: { value: dc }, skipDialog: true });
+      // One strike was flooding the chat with a full card per save; the rolls
+      // now stay silent and everything lands in the single summary below. 3D
+      // dice still animate when that module is present.
+      const roll = await stat.roll({ dc: { value: dc }, skipDialog: true, createMessage: false });
       dos = roll?.options?.degreeOfSuccess ?? roll?.degreeOfSuccess;
+      rollTotal = roll?.total ?? null;
+      if (game.dice3d && roll) {
+        try { await game.dice3d.showForRoll(roll, game.user, true); } catch {}
+      }
     } catch (err) {
       console.warn(`${MODULE_ID} | gated save roll failed`, err);
       continue;
     }
     if (typeof dos !== "number") continue;
+    const saveInfo = `${stat.label} ${rollTotal ?? "?"} vs ${dc} (${i18n(`Dos${dos}`)})`;
     try {
       if (e.kind === "persistent") {
         // A recurring formula has no meaningful half: a failed save applies the
@@ -1493,9 +1506,9 @@ async function runGatedSaves(attacker, item, message) {
             dc: 15
           };
           await targetActor.createEmbeddedDocuments("Item", [src]);
-          lines.push(`${what} → ${i18n("Applied")}`);
+          lines.push(`${what} · ${saveInfo} → ${i18n("Applied")}`);
         } else {
-          lines.push(`${what} → ${i18n("Resisted")}`);
+          lines.push(`${what} · ${saveInfo} → ${i18n("Resisted")}`);
         }
       } else {
         const mult = GATE_MULT[e.save.out][dos] ?? 1;
@@ -1506,9 +1519,9 @@ async function runGatedSaves(attacker, item, message) {
         const final = Math.floor(amount * mult);
         if (final > 0) {
           await targetActor.applyDamage({ damage: final, token: tokenDoc ?? undefined, skipIWR: false });
-          lines.push(`${what} → ${final} ${i18n("Applied")}${mult === 0.5 ? ` (${i18n("SaveHalf")})` : ""}${mult === 2 ? " (x2)" : ""}`);
+          lines.push(`${what} · ${saveInfo} → ${final} ${i18n("Applied")}${mult === 0.5 ? ` (${i18n("SaveHalf")})` : ""}${mult === 2 ? " (x2)" : ""}`);
         } else {
-          lines.push(`${what} → ${i18n("Resisted")}`);
+          lines.push(`${what} · ${saveInfo} → ${i18n("Resisted")}`);
         }
       }
     } catch (err) {
