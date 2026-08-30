@@ -530,7 +530,10 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
   static DEFAULT_OPTIONS = {
     classes: ["swe-editor"],
     tag: "form",
-    position: { width: 620 },
+    // Wide enough that the save controls fit without clipping, tall enough to
+    // show a full tab on open; still resizable. Kept under Foundry's minimum
+    // supported resolution (1366x768).
+    position: { width: 920, height: 700 },
     window: { icon: "fa-solid fa-wand-magic-sparkles", resizable: true },
     form: {
       handler: SimpleWeaponEditor.onSubmit,
