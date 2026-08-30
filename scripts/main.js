@@ -1398,6 +1398,129 @@ async function runHealing(actor, timing, { itemId = null } = {}) {
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/*  Save engine                                                                */
+/*                                                                             */
+/*  Gated damage resolves like a spell rider, but automatically: when a strike */
+/*  hits, the TARGET's save is rolled for them, and the piece is applied per   */
+/*  their degree of success - through applyDamage with IWR respected, so       */
+/*  resistances count. Runs only on the active GM's client, like healing.      */
+/* -------------------------------------------------------------------------- */
+
+function readGatedEntries(item) {
+  const out = [];
+  for (const r of item?._source?.system?.rules ?? []) {
+    if (!r?.sweSave?.type) continue;
+    if (r.key !== "DamageDice" && r.key !== "FlatModifier") continue;
+    if (isCondRule(r) || !isSweRule(r)) continue;
+    const kind =
+      typeof r.label === "string" && r.label.startsWith(SWE_PERS)
+        ? "persistent"
+        : r.category === "splash" || r.damageCategory === "splash"
+          ? "splash"
+          : "";
+    out.push({
+      value: r.key === "DamageDice" ? (r.diceNumber ?? 1) : (r.value ?? 1),
+      die: r.key === "DamageDice" ? (r.dieSize ?? "d6") : "",
+      type: r.damageType ?? "fire",
+      kind,
+      save: {
+        type: r.sweSave.type,
+        dc: clampInt(r.sweSave.dc, 1, 60, 15),
+        mode: r.sweSave.mode === "auto" ? "auto" : "fixed",
+        out: r.sweSave.out === "none" ? "none" : "half"
+      }
+    });
+  }
+  return out;
+}
+
+// degreeOfSuccess: 0 critical failure, 1 failure, 2 success, 3 critical success
+const GATE_MULT = {
+  half: [2, 1, 0.5, 0],
+  none: [1, 1, 0, 0]
+};
+
+async function runGatedSaves(attacker, item, message) {
+  const entries = readGatedEntries(item);
+  if (!entries.length) return;
+  const targetRef = message.flags?.pf2e?.context?.target;
+  if (!targetRef?.actor) return;
+  let targetActor;
+  let tokenDoc = null;
+  try {
+    const doc = await fromUuid(targetRef.actor);
+    targetActor = doc?.actor ?? doc;
+    tokenDoc = targetRef.token ? await fromUuid(targetRef.token) : null;
+  } catch {
+    return;
+  }
+  if (!targetActor) return;
+  const cfg = CONFIG.PF2E ?? {};
+  const lines = [];
+  for (const e of entries) {
+    const dc =
+      e.save.mode === "auto"
+        ? Number(attacker.system?.attributes?.classOrSpellDC?.value) || 0
+        : e.save.dc;
+    const stat = targetActor.getStatistic?.(e.save.type);
+    const tl = labelFor(cfg.damageTypes, e.type);
+    const what = `${condAmount(e)} ${tl}${e.kind === "persistent" ? ` ${i18n("PersistentShort")}` : ""}${e.kind === "splash" ? ` ${i18n("Splash").toLowerCase()}` : ""}`;
+    if (!stat) {
+      lines.push(`${what}: ${i18n("NoStatistic")}`);
+      continue;
+    }
+    let dos;
+    try {
+      const roll = await stat.roll({ dc: { value: dc }, skipDialog: true });
+      dos = roll?.options?.degreeOfSuccess ?? roll?.degreeOfSuccess;
+    } catch (err) {
+      console.warn(`${MODULE_ID} | gated save roll failed`, err);
+      continue;
+    }
+    if (typeof dos !== "number") continue;
+    try {
+      if (e.kind === "persistent") {
+        // A recurring formula has no meaningful half: a failed save applies the
+        // condition, a successful one resists it.
+        if (dos <= 1) {
+          const src = game.pf2e.ConditionManager.getCondition("persistent-damage").toObject();
+          src.system.persistent = {
+            formula: e.die ? `${e.value}${e.die}` : String(e.value),
+            damageType: e.type,
+            dc: 15
+          };
+          await targetActor.createEmbeddedDocuments("Item", [src]);
+          lines.push(`${what} → ${i18n("Applied")}`);
+        } else {
+          lines.push(`${what} → ${i18n("Resisted")}`);
+        }
+      } else {
+        const mult = GATE_MULT[e.save.out][dos] ?? 1;
+        let amount = Number(e.value) || 0;
+        if (e.die) {
+          amount = Number((await new Roll(`${e.value}${e.die}`).evaluate()).total) || 0;
+        }
+        const final = Math.floor(amount * mult);
+        if (final > 0) {
+          await targetActor.applyDamage({ damage: final, token: tokenDoc ?? undefined, skipIWR: false });
+          lines.push(`${what} → ${final} ${i18n("Applied")}${mult === 0.5 ? ` (${i18n("SaveHalf")})` : ""}${mult === 2 ? " (x2)" : ""}`);
+        } else {
+          lines.push(`${what} → ${i18n("Resisted")}`);
+        }
+      }
+    } catch (err) {
+      console.error(`${MODULE_ID} | gated damage apply failed`, err);
+    }
+  }
+  if (lines.length) {
+    await ChatMessage.create({
+      speaker: ChatMessage.getSpeaker({ actor: attacker }),
+      content: `<p><strong>${i18n("AutoSaves")} · ${targetActor.name}</strong></p><p>${lines.join("<br>")}</p>`
+    });
+  }
+}
+
 function canEdit(item) {
   const gmOnly = game.settings.get(MODULE_ID, "gmOnly");
   if (gmOnly) return game.user.isGM;
@@ -1479,4 +1602,5 @@ Hooks.on("createChatMessage", async (message) => {
     console.warn(`${MODULE_ID} | could not mark message`, err);
   }
   await runHealing(actor, "healHit", { itemId });
+  await runGatedSaves(actor, message.item, message);
 });
