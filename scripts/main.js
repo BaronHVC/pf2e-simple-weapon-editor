@@ -593,17 +593,18 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         color: dotFor(d.damage.damageType)
       }
     ];
+    const gateMark = (e) => (e.saveType ? ` [${i18n("SaveShort")}]` : "");
     for (const e of d.extras) {
       const tl = labelFor(cfg.damageTypes, e.type);
       previewParts.push({
-        text: e.die ? ` + ${e.value}${e.die} ${tl}` : ` + ${e.value} ${tl}`,
+        text: (e.die ? ` + ${e.value}${e.die} ${tl}` : ` + ${e.value} ${tl}`) + gateMark(e),
         color: dotFor(e.type)
       });
     }
     for (const e of d.splashes) {
       const tl = labelFor(cfg.damageTypes, e.type);
       previewParts.push({
-        text: ` + ${condAmount(e)} ${tl} ${i18n("Splash").toLowerCase()}`,
+        text: ` + ${condAmount(e)} ${tl} ${i18n("Splash").toLowerCase()}` + gateMark(e),
         color: dotFor(e.type)
       });
     }
@@ -611,7 +612,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       const pl = labelFor(cfg.damageTypes, p.type);
       const amount = p.die ? `${p.value}${p.die}` : `${p.value}`;
       previewParts.push({
-        text: ` + ${amount} ${pl} ${i18n("PersistentShort")}`,
+        text: ` + ${amount} ${pl} ${i18n("PersistentShort")}` + (p.saveType ? ` [${i18n("SaveShort")}]` : ""),
         color: dotFor(p.type)
       });
     }
@@ -1084,11 +1085,14 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       return;
     }
     const firstPers = d.persistents[0];
-    const persistent = firstPers
+    // A save-gated entry cannot live in the native persistent field (its damage
+    // must stay out of the main roll), so only a save-less first entry does.
+    const nativePers = firstPers && !firstPers.saveType ? firstPers : null;
+    const persistent = nativePers
       ? {
-          number: Number(firstPers.value) || 1,
-          faces: firstPers.die ? Number(String(firstPers.die).replace("d", "")) || null : null,
-          type: firstPers.type || "bleed"
+          number: Number(nativePers.value) || 1,
+          faces: nativePers.die ? Number(String(nativePers.die).replace("d", "")) || null : null,
+          type: nativePers.type || "bleed"
         }
       : null;
     const keep = (this.item._source.system.rules ?? []).filter((r) => !isSweRule(r));
@@ -1099,7 +1103,13 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     // Entries with a save emit a companion Note so the damage card carries the
     // system's clickable @Check; regenerated every save, never read back.
     const saveNotes = [];
-    const mkSaveNote = (e, tl, suffix) => {
+    // Save-gated damage follows the spell pattern: it leaves the main roll and
+    // the note carries the @Check AND its own @Damage button, so each target
+    // resolves their save and applies that piece per their own outcome. The
+    // system draws no link between a save result and a damage card (verified
+    // by rolling both), so keeping gated damage in the main roll made "the
+    // system knows they saved" impossible.
+    const mkSaveNote = (e, tl, kind) => {
       if (!e.saveType) return;
       const basic = e.saveOut === "half" ? "|basic:true" : "";
       const clause = i18n(e.saveOut === "half" ? "NoteHalf" : "NoteNone");
@@ -1107,18 +1117,18 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         e.saveDcMode === "auto"
           ? "resolve(@actor.attributes.classOrSpellDC.value)"
           : e.saveDc;
+      const roll = e.die ? `${e.value}${e.die}` : `${e.value}`;
+      const dmgType = kind === "persistent" ? `persistent,${e.type}` : e.type;
+      const suffix = kind === "persistent" ? ` ${i18n("PersistentShort")}` : kind === "splash" ? ` ${i18n("Splash").toLowerCase()}` : "";
       saveNotes.push({
         key: "Note",
         selector: "{item|id}-damage",
-        title: `${condAmount(e)} ${tl}${suffix ? ` ${suffix}` : ""}${e.src ? ` · ${e.src}` : ""}`,
-        text: `@Check[type:${e.saveType}|dc:${dcPart}${basic}] — ${clause}`,
+        title: `${condAmount(e)} ${tl}${suffix}${e.src ? ` · ${e.src}` : ""}`,
+        text: `@Check[type:${e.saveType}|dc:${dcPart}${basic}] @Damage[(${roll})[${dmgType}]] — ${clause}`,
         label: `${SWE_MARK}N:`
       });
     };
-    if (firstPers?.saveType) {
-      mkSaveNote(firstPers, labelFor(cfg.damageTypes, firstPers.type), i18n("PersistentShort"));
-    }
-    const persRules = d.persistents.slice(1).map((e) => {
+    const persRules = (nativePers ? d.persistents.slice(1) : d.persistents).map((e) => {
       const tl = labelFor(cfg.damageTypes, e.type);
       let rule;
       if (e.die) {
@@ -1143,7 +1153,11 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       }
       if (e.saveType) {
         rule.sweSave = { type: e.saveType, dc: e.saveDc, mode: e.saveDcMode, out: e.saveOut };
-        mkSaveNote(e, tl, i18n("PersistentShort"));
+        // Inert in the roll, invisible in the dialog: the rule only carries the
+        // entry's data; the note's @Damage is what the table actually rolls.
+        rule.predicate = ["swe-gated"];
+        rule.hideIfDisabled = true;
+        mkSaveNote(e, tl, "persistent");
       }
       return rule;
     });
@@ -1175,7 +1189,9 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       }
       if (e.saveType) {
         rule.sweSave = { type: e.saveType, dc: e.saveDc, mode: e.saveDcMode, out: e.saveOut };
-        mkSaveNote(e, tl, splash ? i18n("Splash").toLowerCase() : "");
+        rule.predicate = ["swe-gated"];
+        rule.hideIfDisabled = true;
+        mkSaveNote(e, tl, splash ? "splash" : "");
       }
       return rule;
     };
@@ -1263,9 +1279,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       "system.damage.damageType": d.damage.damageType,
       "system.damage.persistent": persistent,
       "system.splashDamage.value": Number(d.splash) || 0,
-      [`flags.${MODULE_ID}.persSave`]: firstPers?.saveType
-        ? { type: firstPers.saveType, dc: firstPers.saveDc, mode: firstPers.saveDcMode, out: firstPers.saveOut }
-        : null,
+      [`flags.${MODULE_ID}.persSave`]: null,
       "system.runes.potency": Number(d.runes.potency) || 0,
       "system.runes.striking": Number(d.runes.striking) || 0,
       "system.runes.property": [...d.runes.property],
