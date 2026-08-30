@@ -14,6 +14,7 @@ const COND_FILTERS = ["ancestry", "heritage", "class", "feat"];
 const COND_EFFECTS = ["damage", "healTurn", "healHit"];
 const COND_FLAG = "conditionals";
 const COND_DONE_FLAG = "healed";
+const SAVES_DONE_FLAG = "savesDone";
 
 // PF2e is not uniform here: ancestry sets `self:ancestry:<slug>`, class sets
 // `class:<slug>` with no `self:` prefix at all, and heritage sets the bare form
@@ -1605,17 +1606,35 @@ Hooks.on("pf2e.startTurn", (combatant) => {
 Hooks.on("createChatMessage", async (message) => {
   if (!isSoleExecutor()) return;
   const ctx = message?.flags?.pf2e?.context;
-  if (ctx?.type !== "attack-roll") return;
-  if (ctx.outcome !== "success" && ctx.outcome !== "criticalSuccess") return;
-  if (message.getFlag?.(MODULE_ID, COND_DONE_FLAG)) return;
-  const actor = message.actor;
-  const itemId = message.item?.id;
-  if (!actor || !itemId) return;
-  try {
-    await message.setFlag(MODULE_ID, COND_DONE_FLAG, true);
-  } catch (err) {
-    console.warn(`${MODULE_ID} | could not mark message`, err);
+  if (ctx?.type === "attack-roll") {
+    if (ctx.outcome !== "success" && ctx.outcome !== "criticalSuccess") return;
+    if (message.getFlag?.(MODULE_ID, COND_DONE_FLAG)) return;
+    const actor = message.actor;
+    const itemId = message.item?.id;
+    if (!actor || !itemId) return;
+    try {
+      await message.setFlag(MODULE_ID, COND_DONE_FLAG, true);
+    } catch (err) {
+      console.warn(`${MODULE_ID} | could not mark message`, err);
+    }
+    await runHealing(actor, "healHit", { itemId });
+    return;
   }
-  await runHealing(actor, "healHit", { itemId });
-  await runGatedSaves(actor, message.item, message);
+  // Saves resolve when damage is actually rolled, not on the hit: if the table
+  // never rolls the damage, no riders fire. The damage message carries the
+  // target, the outcome and the item (verified), and rolling damage after a
+  // miss keeps its failure outcome, which skips the saves.
+  if (ctx?.type === "damage-roll") {
+    if (ctx.outcome && ctx.outcome !== "success" && ctx.outcome !== "criticalSuccess") return;
+    if (message.getFlag?.(MODULE_ID, SAVES_DONE_FLAG)) return;
+    const actor = message.actor;
+    const item = message.item;
+    if (!actor || !item) return;
+    try {
+      await message.setFlag(MODULE_ID, SAVES_DONE_FLAG, true);
+    } catch (err) {
+      console.warn(`${MODULE_ID} | could not mark message`, err);
+    }
+    await runGatedSaves(actor, item, message);
+  }
 });
