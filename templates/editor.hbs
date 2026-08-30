@@ -205,15 +205,14 @@
 
     {{#each condIndexed}}
     <div class="swe-card swe-kind-{{this.kind}}">
-      <div class="swe-card-head">
-        <span class="swe-fx-icon">{{#if this.isDamage}}<i class="fa-solid fa-fire"></i>{{else}}<i class="fa-solid fa-heart"></i>{{/if}}</span>
+      <div class="swe-card-head"{{#if this.isDamage}} style="background: {{this.headBg}}"{{/if}}>
+        <span class="swe-fx-icon"{{#if this.isDamage}} style="color: {{this.dot}}; background: {{this.iconBg}}; border-color: {{this.iconBorder}}"{{/if}}>{{#if this.isDamage}}<i class="fa-solid {{this.icon}}"></i>{{else}}<i class="fa-solid fa-heart"></i>{{/if}}</span>
         <select name="conds.{{this.index}}.effect" class="swe-fx-select">
           {{#each ../effectOptions}}
           <option value="{{this.value}}" {{#if (sweEq this.value ../effect)}}selected{{/if}}>{{this.label}}</option>
           {{/each}}
         </select>
         {{#if this.isDamage}}
-        <i class="swe-dmgicon fa-solid {{this.icon}}" style="color: {{this.dot}}"></i>
         <select name="conds.{{this.index}}.type">
           {{#each ../damageTypes}}
           <option value="{{this.value}}" {{#if (sweEq this.value ../type)}}selected{{/if}}>{{this.label}}</option>

@@ -227,6 +227,13 @@ function iconFor(type) {
   return DMG_ICONS[type] ?? "fa-asterisk";
 }
 
+// The same type color at different strengths, for tinting a card header and
+// its icon badge without one CSS rule per damage type.
+function tintFor(hex, alpha) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+
 function i18n(key) {
   return game.i18n.localize(`SWE.${key}`);
 }
@@ -577,6 +584,9 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       kind: c.effect === "damage" ? "damage" : "heal",
       dot: dotFor(c.type),
       icon: iconFor(c.type),
+      headBg: tintFor(dotFor(c.type), 0.10),
+      iconBg: tintFor(dotFor(c.type), 0.16),
+      iconBorder: tintFor(dotFor(c.type), 0.5),
       amount: condAmount(c),
       onlyOneCrit: c.criteria.length <= 1,
       criteria: c.criteria.map((crit, j) => {
