@@ -1463,6 +1463,11 @@ async function runGatedSaves(attacker, item, message) {
     return;
   }
   if (!targetActor) return;
+  // A critical Strike doubles its damage, gated pieces included - the system
+  // does the same with its own persistent partials on a crit. The save ladder
+  // then applies on top of the doubled amount (a critically failed basic save
+  // on a critical hit is the literal composition of both rules).
+  const critHit = message.flags?.pf2e?.context?.outcome === "criticalSuccess";
   const cfg = CONFIG.PF2E ?? {};
   const lines = [];
   for (const e of entries) {
@@ -1501,13 +1506,14 @@ async function runGatedSaves(attacker, item, message) {
         // condition, a successful one resists it.
         if (dos <= 1) {
           const src = game.pf2e.ConditionManager.getCondition("persistent-damage").toObject();
+          const base = e.die ? `${e.value}${e.die}` : String(e.value);
           src.system.persistent = {
-            formula: e.die ? `${e.value}${e.die}` : String(e.value),
+            formula: critHit ? `(${base})*2` : base,
             damageType: e.type,
             dc: 15
           };
           await targetActor.createEmbeddedDocuments("Item", [src]);
-          lines.push(`${what} · ${saveInfo} → ${i18n("Applied")}`);
+          lines.push(`${what} · ${saveInfo} → ${i18n("Applied")}${critHit ? ` (${i18n("CritMark")})` : ""}`);
         } else {
           lines.push(`${what} · ${saveInfo} → ${i18n("Resisted")}`);
         }
@@ -1517,10 +1523,11 @@ async function runGatedSaves(attacker, item, message) {
         if (e.die) {
           amount = Number((await new Roll(`${e.value}${e.die}`).evaluate()).total) || 0;
         }
+        if (critHit) amount *= 2;
         const final = Math.floor(amount * mult);
         if (final > 0) {
           await targetActor.applyDamage({ damage: final, token: tokenDoc ?? undefined, skipIWR: false });
-          lines.push(`${what} · ${saveInfo} → ${final} ${i18n("Applied")}${mult === 0.5 ? ` (${i18n("SaveHalf")})` : ""}${mult === 2 ? " (x2)" : ""}`);
+          lines.push(`${what} · ${saveInfo} → ${final} ${i18n("Applied")}${critHit ? ` (${i18n("CritMark")})` : ""}${mult === 0.5 ? ` (${i18n("SaveHalf")})` : ""}${mult === 2 ? " (x2)" : ""}`);
         } else {
           lines.push(`${what} · ${saveInfo} → ${i18n("Resisted")}`);
         }

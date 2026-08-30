@@ -63,6 +63,7 @@
   "SWE.Dos1": "failure",
   "SWE.Dos2": "success",
   "SWE.Dos3": "critical success",
+  "SWE.CritMark": "crit ×2",
   "SWE.AutoSaves": "Saves resolved",
   "SWE.Applied": "applied",
   "SWE.Resisted": "resisted",
