@@ -127,8 +127,10 @@ jobs:
       # Canal de pruebas: una etiqueta fija cuyos archivos se reemplazan en cada
       # prerelease, para instalar siempre desde la misma URL. El release por
       # version sigue existiendo aparte, para poder volver a una rc concreta.
+      # Corre en TODO release, no solo prereleases: si no, publicar estables
+      # directas deja el canal congelado y las instalaciones que vinieron de el
+      # nunca ven la version nueva (paso con la v0.9.x: dev quedo en 0.8.0.21).
       - name: Actualizar el canal de pruebas
-        if: steps.v.outputs.prerelease == 'true'
         # El canal de pruebas es una comodidad, no parte del release: si falla,
         # la version publicada arriba sigue siendo valida y el run no se marca
         # como fallido por esto.
