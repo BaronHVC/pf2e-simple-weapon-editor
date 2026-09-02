@@ -1,7 +1,7 @@
 {
   "id": "pf2e-simple-weapon-editor",
   "title": "PF2e Simple Weapon Editor",
-  "description": "A friendly editor window for PF2e weapons: damage, runes and traits without touching JSON or rule elements. / Editor amigable de armas para PF2e.",
+  "description": "One window for everything a PF2e weapon does: damage with splash and per-entry saves, runes, traits, and wielder-dependent effects - resolved automatically at the table (target rolls the save, damage applies by degree, healing triggers on its own). / Editor completo de armas PF2e con salvaciones, curaciones y condiciones por portador resueltas automaticamente en mesa.",
   "version": "0.7.0-local",
   "authors": [
     {
