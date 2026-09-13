@@ -203,6 +203,48 @@
       <button type="button" data-action="sweAddPersistent" class="swe-ghostbtn swe-ghost-pers"><i class="fa-solid fa-plus"></i> {{localize "SWE.Persistent"}}</button>
     </div>
 
+    <div class="swe-block swe-block-hconds">
+      <div class="swe-block-head">
+        <span class="swe-block-title swe-title-hconds"><i class="fa-solid fa-bolt"></i> {{localize "SWE.HitCondsHead"}}</span>
+        <span class="swe-block-note">{{localize "SWE.HitCondsHint"}}</span>
+      </div>
+      {{#each hitCondsIndexed}}
+      <div class="swe-row">
+        <select name="hconds.{{this.index}}.who" class="swe-cat">
+          <option value="target" {{#unless (sweEq this.who 'wielder')}}selected{{/unless}}>{{localize "SWE.HitWho_target"}}</option>
+          <option value="wielder" {{#if (sweEq this.who 'wielder')}}selected{{/if}}>{{localize "SWE.HitWho_wielder"}}</option>
+        </select>
+        <select name="hconds.{{this.index}}.condition">
+          {{#each ../conditionOptions}}
+          <option value="{{this.value}}" {{#if (sweEq this.value ../condition)}}selected{{/if}}>{{this.label}}</option>
+          {{/each}}
+        </select>
+        <input type="number" name="hconds.{{this.index}}.value" value="{{this.value}}" min="1" max="99" step="1" class="swe-narrow" title="{{localize 'SWE.HitCondValue'}}" />
+        <select name="hconds.{{this.index}}.saveType" class="swe-cat" title="{{localize 'SWE.SaveTitle'}}">
+          <option value="" {{#unless this.saveType}}selected{{/unless}}>&mdash;</option>
+          {{#each ../saveOptions}}
+          <option value="{{this.value}}" {{#if (sweEq this.value ../saveType)}}selected{{/if}}>{{this.label}}</option>
+          {{/each}}
+        </select>
+        {{#if this.saveType}}
+        <select name="hconds.{{this.index}}.saveDcMode" class="swe-cat" title="{{localize 'SWE.DcAutoHint'}}">
+          <option value="fixed" {{#unless (sweEq this.saveDcMode 'auto')}}selected{{/unless}}>{{localize "SWE.DcFixed"}}</option>
+          <option value="auto" {{#if (sweEq this.saveDcMode 'auto')}}selected{{/if}}>{{localize "SWE.DcAuto"}}</option>
+        </select>
+        {{#unless (sweEq this.saveDcMode 'auto')}}
+        <input type="number" name="hconds.{{this.index}}.saveDc" value="{{this.saveDc}}" min="1" max="60" step="1" class="swe-narrow" title="{{localize 'SWE.SaveDC'}}" />
+        {{/unless}}
+        <select name="hconds.{{this.index}}.saveOut" class="swe-cat">
+          <option value="fail" {{#unless (sweEq this.saveOut 'critFail')}}selected{{/unless}}>{{localize "SWE.HitWhen_fail"}}</option>
+          <option value="critFail" {{#if (sweEq this.saveOut 'critFail')}}selected{{/if}}>{{localize "SWE.HitWhen_critFail"}}</option>
+        </select>
+        {{/if}}
+        <a class="swe-rowdel" data-action="sweRemoveHitCond" data-index="{{this.index}}" title="{{localize 'SWE.Remove'}}"><i class="fa-solid fa-trash"></i></a>
+      </div>
+      {{/each}}
+      <button type="button" data-action="sweAddHitCond" class="swe-ghostbtn swe-ghost-hconds"><i class="fa-solid fa-plus"></i> {{localize "SWE.HitCondsAdd"}}</button>
+    </div>
+
     <div class="swe-previewbar">
       <span class="swe-previewbar-label">{{localize "SWE.Preview"}}:</span>
       {{#each previewParts}}<span style="color: {{this.color}}">{{this.text}}</span>{{/each}}

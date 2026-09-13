@@ -691,3 +691,10 @@
 }
 .swe-editor .swe-title-splash { color: #7fb0d4; }
 .swe-editor .swe-ghost-splash { color: #7fb0d4; border-color: #5a7a94; }
+
+.swe-editor .swe-block-hconds {
+  border-color: rgba(199, 146, 234, 0.4);
+  background: rgba(199, 146, 234, 0.05);
+}
+.swe-editor .swe-title-hconds { color: #c792ea; }
+.swe-editor .swe-ghost-hconds { color: #c792ea; border-color: #8a6a9e; }

@@ -16,6 +16,7 @@ const SWE_COND_SLUG = "swe-cond";
 const COND_FILTERS = ["ancestry", "heritage", "class", "feat", "map"];
 const COND_EFFECTS = ["damage", "healTurn", "healHit"];
 const COND_FLAG = "conditionals";
+const HITCOND_FLAG = "hitConds";
 const COND_DONE_FLAG = "healed";
 const SAVES_DONE_FLAG = "savesDone";
 
@@ -169,6 +170,27 @@ function readConds(item) {
     if (c.criteria.length) cleaned.push(c);
   }
   return dedupeConds(cleaned);
+}
+
+// Conditions applied on a hit (frightened, clumsy, quickened...) have no rule
+// element home - PF2e has no "apply a condition on strike" rule - so they live
+// in their own module flag, like the wielder conditionals, and the engine
+// applies them when the damage is rolled. Either side can receive one, and a
+// save can gate it: it then lands on a failed save, or only on a critical one.
+function normalizeHitCond(h) {
+  return {
+    condition: String(h?.condition ?? "").trim(),
+    value: clampInt(h?.value, 1, 99, 1),
+    who: h?.who === "wielder" ? "wielder" : "target",
+    ...normalizeSave(h),
+    saveOut: h?.saveOut === "critFail" ? "critFail" : "fail"
+  };
+}
+
+function readHitConds(item) {
+  const raw = item?._source?.flags?.[MODULE_ID]?.[HITCOND_FLAG];
+  if (!Array.isArray(raw)) return [];
+  return raw.map(normalizeHitCond).filter((h) => h.condition);
 }
 
 function slugOf(name) {
@@ -554,6 +576,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       },
       traits: [...new Set(src.traits?.value ?? [])],
       conditionals: readConds(item),
+      hitConds: readHitConds(item),
       freeMode: false
     };
   }
@@ -578,6 +601,8 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       sweRemoveSplash: SimpleWeaponEditor.actRemoveSplash,
       sweAddPersistent: SimpleWeaponEditor.actAddPersistent,
       sweRemovePersistent: SimpleWeaponEditor.actRemovePersistent,
+      sweAddHitCond: SimpleWeaponEditor.actAddHitCond,
+      sweRemoveHitCond: SimpleWeaponEditor.actRemoveHitCond,
       sweAddRune: SimpleWeaponEditor.actAddRune,
       sweRemoveRune: SimpleWeaponEditor.actRemoveRune,
       sweShowRune: SimpleWeaponEditor.actShowRune,
@@ -645,6 +670,14 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       previewParts.push({
         text: ` + ${amount} ${pl} ${i18n("PersistentShort")}` + (p.saveType ? ` [${i18n("SaveShort")}]` : ""),
         color: dotFor(p.type)
+      });
+    }
+    for (const h of d.hitConds) {
+      if (!h.condition) continue;
+      const who = i18n(h.who === "wielder" ? "HitWho_wielder" : "HitWho_target");
+      previewParts.push({
+        text: ` + ${labelFor(cfg.conditionTypes, h.condition)}${h.value > 1 ? ` ${h.value}` : ""} (${who})` + (h.saveType ? ` [${i18n("SaveShort")}]` : ""),
+        color: "#c792ea"
       });
     }
     if (d.splash > 0) {
@@ -752,6 +785,12 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
           label: game.i18n.localize(v?.label ?? k)
         }))
       ],
+      conditionOptions: locRecord(cfg.conditionTypes),
+      hitCondsIndexed: d.hitConds.map((h, i) => ({
+        ...h,
+        index: i,
+        label: labelFor(cfg.conditionTypes, h.condition)
+      })),
       dmgCondRows,
       persIndexed: d.persistents.map((e, i) => ({ ...e, index: i, dot: dotFor(e.type), icon: iconFor(e.type) })),
       runesResolved: d.runes.property.map((slug, i) => {
@@ -927,6 +966,13 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       }
       d.persistents = arr;
     }
+    if (o.hconds) {
+      const arr = [];
+      for (const k of Object.keys(o.hconds).sort((a, b) => Number(a) - Number(b))) {
+        arr.push(normalizeHitCond(o.hconds[k] ?? {}));
+      }
+      d.hitConds = arr;
+    }
     if (o.conds) {
       const byIndex = (a, b) => Number(a) - Number(b);
       const arr = [];
@@ -978,6 +1024,19 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     this.syncFromForm();
     const idx = Number(target?.dataset?.index);
     this.data.splashes = this.data.splashes.filter((e, i) => i !== idx);
+    this.render();
+  }
+
+  static actAddHitCond(event, target) {
+    this.syncFromForm();
+    this.data.hitConds.push(normalizeHitCond({ condition: "frightened" }));
+    this.render();
+  }
+
+  static actRemoveHitCond(event, target) {
+    this.syncFromForm();
+    const idx = Number(target?.dataset?.index);
+    this.data.hitConds = this.data.hitConds.filter((e, i) => i !== idx);
     this.render();
   }
 
@@ -1336,7 +1395,8 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       "system.runes.property": [...d.runes.property],
       "system.traits.value": [...d.traits],
       "system.rules": [...keep, ...sweRules, ...persRules, ...helperRules, ...condRules],
-      [`flags.${MODULE_ID}.${COND_FLAG}`]: conds
+      [`flags.${MODULE_ID}.${COND_FLAG}`]: conds,
+      [`flags.${MODULE_ID}.${HITCOND_FLAG}`]: d.hitConds.filter((h) => h.condition)
     };
     if (d.totalGp !== undefined) {
       const derivedGp = Number(this.item.system?.price?.value?.gp ?? 0);
@@ -1668,6 +1728,82 @@ async function runMapConds(attacker, item, message) {
   }
 }
 
+// Applies the on-hit conditions when damage is rolled: wielder entries land on
+// the attacker, target entries on the strike's target. A save-gated entry rolls
+// the RECIPIENT's statistic silently (auto DC = the wielder's spell-or-class
+// DC) and applies on a failed save, or only on a critically failed one. Valued
+// conditions (frightened 2) are created with their value; the rest as-is.
+async function runHitConditions(attacker, item, message) {
+  const entries = readHitConds(item);
+  if (!entries.length) return;
+  const targetRef = message.flags?.pf2e?.context?.target;
+  let targetActor = null;
+  try {
+    if (targetRef?.actor) {
+      const doc = await fromUuid(targetRef.actor);
+      targetActor = doc?.actor ?? doc;
+    }
+  } catch {
+    targetActor = null;
+  }
+  const cfg = CONFIG.PF2E ?? {};
+  const lines = [];
+  for (const h of entries) {
+    const recipient = h.who === "wielder" ? attacker : targetActor;
+    if (!recipient) continue;
+    const clabel = labelFor(cfg.conditionTypes, h.condition);
+    let apply = true;
+    let saveInfo = "";
+    if (h.saveType) {
+      const dc =
+        h.saveDcMode === "auto"
+          ? Number(attacker.system?.attributes?.classOrSpellDC?.value) || 0
+          : h.saveDc;
+      const stat = recipient.getStatistic?.(h.saveType);
+      if (!stat) {
+        lines.push(`${clabel} → ${recipient.name}: ${i18n("NoStatistic")}`);
+        continue;
+      }
+      let dos;
+      let total = null;
+      try {
+        const roll = await stat.roll({ dc: { value: dc }, skipDialog: true, createMessage: false });
+        dos = roll?.options?.degreeOfSuccess ?? roll?.degreeOfSuccess;
+        total = roll?.total ?? null;
+        if (game.dice3d && roll) {
+          try { await game.dice3d.showForRoll(roll, game.user, true); } catch {}
+        }
+      } catch (err) {
+        console.warn(`${MODULE_ID} | hit-condition save failed`, err);
+        continue;
+      }
+      if (typeof dos !== "number") continue;
+      apply = h.saveOut === "critFail" ? dos === 0 : dos <= 1;
+      saveInfo = ` · ${stat.label} ${total ?? "?"} vs ${dc} (${i18n(`Dos${dos}`)})`;
+    }
+    try {
+      if (apply) {
+        const src = game.pf2e.ConditionManager.getCondition(h.condition)?.toObject();
+        if (!src) continue;
+        const valued = !!src.system?.value?.isValued;
+        if (valued) src.system.value.value = h.value;
+        await recipient.createEmbeddedDocuments("Item", [src]);
+        lines.push(`${valued ? `${clabel} ${h.value}` : clabel} → ${recipient.name}${saveInfo} → ${i18n("Applied")}`);
+      } else {
+        lines.push(`${clabel} → ${recipient.name}${saveInfo} → ${i18n("Resisted")}`);
+      }
+    } catch (err) {
+      console.error(`${MODULE_ID} | hit-condition apply failed`, err);
+    }
+  }
+  if (lines.length) {
+    await ChatMessage.create({
+      speaker: ChatMessage.getSpeaker({ actor: attacker }),
+      content: `<p><strong>${i18n("HitCondsHead")}</strong></p><p>${lines.join("<br>")}</p>`
+    });
+  }
+}
+
 function canEdit(item) {
   const gmOnly = game.settings.get(MODULE_ID, "gmOnly");
   if (gmOnly) return game.user.isGM;
@@ -1768,5 +1904,6 @@ Hooks.on("createChatMessage", async (message) => {
     }
     await runGatedSaves(actor, item, message);
     await runMapConds(actor, item, message);
+    await runHitConditions(actor, item, message);
   }
 });
