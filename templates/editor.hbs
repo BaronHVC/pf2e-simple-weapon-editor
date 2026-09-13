@@ -72,7 +72,7 @@
         </select>
         <i class="swe-dmgicon fa-solid {{this.icon}}" style="color: {{this.dot}}"></i>
         <select name="extras.{{this.index}}.type">
-          {{#each ../damageTypes}}
+          {{#each ../damageTypesExt}}
           <option value="{{this.value}}" {{#if (sweEq this.value ../this.type)}}selected{{/if}}>{{this.label}}</option>
           {{/each}}
         </select>
@@ -315,7 +315,7 @@
         </select>
         {{#if this.isDamage}}
         <select name="conds.{{this.index}}.type">
-          {{#each ../damageTypes}}
+          {{#each ../damageTypesExt}}
           <option value="{{this.value}}" {{#if (sweEq this.value ../type)}}selected{{/if}}>{{this.label}}</option>
           {{/each}}
         </select>

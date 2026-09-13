@@ -44,6 +44,7 @@
   "SWE.DerivedPriceHint": "Valor total calculado por el sistema (precio base + runas). Solo lectura.",
   "SWE.TotalPriceHint": "Precio total que muestra la ficha. Escribe un valor custom para fijarlo; vacía el campo para volver al precio automático.",
   "SWE.RunesPriceHint": "Valor aportado por las runas (automático).",
+  "SWE.Precision": "Precisión",
   "SWE.Splash": "Salpicadura",
   "SWE.SplashHint": "golpea todo a 5 pies al impactar; el objetivo la recibe incluso al fallar. Usa el tipo del daño base.",
   "SWE.FromCond": "si:",

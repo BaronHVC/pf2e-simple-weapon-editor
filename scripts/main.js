@@ -226,7 +226,7 @@ function resolveCritInput(choices, filter, text) {
 const DMG_COLORS = {
   fire: "#d4813a", cold: "#7fb0d4", acid: "#5fbe7e", electricity: "#d8b95e",
   poison: "#9a7fc0", bleed: "#c25b5b", mental: "#c07fb0", sonic: "#7fc0b8",
-  force: "#8fa0e0", vitality: "#8fd4a0", void: "#8f7fa8", spirit: "#a8c0e8"
+  force: "#8fa0e0", vitality: "#8fd4a0", void: "#8f7fa8", spirit: "#a8c0e8", precision: "#d8c66a"
 };
 function dotFor(type) {
   return DMG_COLORS[type] ?? "#b8b8c2";
@@ -239,7 +239,7 @@ const DMG_ICONS = {
   poison: "fa-skull-crossbones", bleed: "fa-droplet", mental: "fa-brain",
   sonic: "fa-volume-high", force: "fa-burst", vitality: "fa-sun", void: "fa-moon",
   spirit: "fa-ghost", slashing: "fa-slash", piercing: "fa-syringe",
-  bludgeoning: "fa-hammer"
+  bludgeoning: "fa-hammer", precision: "fa-crosshairs"
 };
 function iconFor(type) {
   return DMG_ICONS[type] ?? "fa-asterisk";
@@ -266,6 +266,15 @@ function locRecord(record) {
   }
   out.sort((a, b) => a.label.localeCompare(b.label, game.i18n.lang));
   return out;
+}
+
+// Precision is a damage CATEGORY in PF2e, not a type: it folds into the
+// weapon's base damage type and precision-immune creatures ignore it (verified
+// in the sandbox: a precision d8 lands inside the slashing group). The editor
+// still offers it where a type would go, because that is how people think of
+// it, and maps it to the category on save.
+function damageTypeLabel(cfg, t) {
+  return t === "precision" ? i18n("Precision") : labelFor(cfg.damageTypes, t);
 }
 
 function labelFor(record, slug) {
@@ -469,6 +478,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       let srcLabel = r.label.slice(mark.length).trim();
       if (AUTO_LABEL_RE.test(srcLabel)) srcLabel = "";
       const isSplash = r.category === "splash" || r.damageCategory === "splash";
+      const isPrecision = r.category === "precision" || r.damageCategory === "precision";
       const dest = isPers ? bucket : isSplash ? splashes : bucket;
       const save = normalizeSave({
         saveType: r.sweSave?.type,
@@ -480,7 +490,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         dest.push({
           value: r.diceNumber ?? 1,
           die: r.dieSize ?? "d6",
-          type: r.damageType ?? "fire",
+          type: isPrecision ? "precision" : (r.damageType ?? "fire"),
           src: srcLabel,
           ...save
         });
@@ -488,7 +498,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         dest.push({
           value: r.value ?? 1,
           die: "",
-          type: r.damageType ?? "fire",
+          type: isPrecision ? "precision" : (r.damageType ?? "fire"),
           src: srcLabel,
           ...save
         });
@@ -596,7 +606,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     ];
     const gateMark = (e) => (e.saveType ? ` [${i18n("SaveShort")}]` : "");
     for (const e of d.extras) {
-      const tl = labelFor(cfg.damageTypes, e.type);
+      const tl = damageTypeLabel(cfg, e.type);
       previewParts.push({
         text: (e.die ? ` + ${e.value}${e.die} ${tl}` : ` + ${e.value} ${tl}`) + gateMark(e),
         color: dotFor(e.type)
@@ -675,7 +685,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       .map(({ c, i }) => ({
         condIndex: i,
         amount: condAmount(c),
-        typeLabel: labelFor(cfg.damageTypes, c.type),
+        typeLabel: damageTypeLabel(cfg, c.type),
         dot: dotFor(c.type),
         icon: iconFor(c.type),
         reason: c.src || c.criteria.map((cr) => condLabel(choices, cr) ?? cr.slug).join(" + ")
@@ -698,6 +708,10 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       runesGp,
       dies: DIES,
       damageTypes: locRecord(cfg.damageTypes),
+      damageTypesExt: [
+        { value: "precision", label: i18n("Precision") },
+        ...locRecord(cfg.damageTypes)
+      ],
       weaponTraits: traitOpts,
       propertyRunes: runeOpts,
       potencyOptions: [0, 1, 2, 3, 4],
@@ -1120,6 +1134,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
           : e.saveDc;
       const roll = e.die ? `${e.value}${e.die}` : `${e.value}`;
       const dmgType = kind === "persistent" ? `persistent,${e.type}` : e.type;
+      const dmgPart = e.type === "precision" ? `@Damage[(${roll})]` : `@Damage[(${roll})[${dmgType}]]`;
       const suffix = kind === "persistent" ? ` ${i18n("PersistentShort")}` : kind === "splash" ? ` ${i18n("Splash").toLowerCase()}` : "";
       saveNotes.push({
         key: "Note",
@@ -1127,7 +1142,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         // Titled as separate on purpose: the note renders inside the damage
         // card, and without the marker it reads as part of that roll.
         title: `${i18n("Independent")} · ${condAmount(e)} ${tl}${suffix}${e.src ? ` · ${e.src}` : ""}`,
-        text: `@Check[type:${e.saveType}|dc:${dcPart}${basic}] @Damage[(${roll})[${dmgType}]] — ${clause}`,
+        text: `@Check[type:${e.saveType}|dc:${dcPart}${basic}] ${dmgPart} — ${clause}`,
         label: `${SWE_MARK}N:`
       });
     };
@@ -1168,7 +1183,8 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     // carries the system's own clickable @Check button, and the table applies
     // full, half or none with the card's standard buttons.
     const mkDamageRule = (e, splash) => {
-      const tl = labelFor(cfg.damageTypes, e.type);
+      const tl = damageTypeLabel(cfg, e.type);
+      const precision = e.type === "precision";
       let rule;
       if (e.die) {
         rule = {
@@ -1176,18 +1192,20 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
           selector: "{item|id}-damage",
           diceNumber: Number(e.value) || 1,
           dieSize: e.die,
-          damageType: e.type,
           label: mkLabel(SWE_MARK, e, tl)
         };
+        if (!precision) rule.damageType = e.type;
+        if (precision) rule.category = "precision";
         if (splash) rule.category = "splash";
       } else {
         rule = {
           key: "FlatModifier",
           selector: "{item|id}-damage",
           value: Number(e.value) || 1,
-          damageType: e.type,
           label: mkLabel(SWE_MARK, e, tl)
         };
+        if (!precision) rule.damageType = e.type;
+        if (precision) rule.damageCategory = "precision";
         if (splash) rule.damageCategory = "splash";
       }
       if (e.saveType) {
@@ -1229,13 +1247,12 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     const condRules = conds
       .filter((c) => c.effect === "damage")
       .map((c, i) => {
-        const tl = labelFor(cfg.damageTypes, c.type);
+        const tl = damageTypeLabel(cfg, c.type);
         const who = c.criteria.map((crit) => crit.slug).join(" + ");
         const auto = `${condAmount(c)} ${tl} · ${who}`;
         const base = {
           slug: `${SWE_COND_SLUG}-${i}`,
           selector: "{item|id}-damage",
-          damageType: c.type,
           predicate: condPredicate(c),
           // Without this PF2e still lists the conditional in the damage panel as a
           // struck-through toggle when the wielder does not match, which invites
@@ -1245,6 +1262,12 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
           // player sees in the damage breakdown is just the effect.
           label: c.src || auto
         };
+        if (c.type === "precision") {
+          if (c.die) base.category = "precision";
+          else base.damageCategory = "precision";
+        } else {
+          base.damageType = c.type;
+        }
         return c.die
           ? { ...base, key: "DamageDice", diceNumber: Number(c.value) || 1, dieSize: c.die }
           : { ...base, key: "FlatModifier", value: Number(c.value) || 1 };
@@ -1476,7 +1499,7 @@ async function runGatedSaves(attacker, item, message) {
         ? Number(attacker.system?.attributes?.classOrSpellDC?.value) || 0
         : e.save.dc;
     const stat = targetActor.getStatistic?.(e.save.type);
-    const tl = labelFor(cfg.damageTypes, e.type);
+    const tl = damageTypeLabel(cfg, e.type);
     const what = `${condAmount(e)} ${tl}${e.kind === "persistent" ? ` ${i18n("PersistentShort")}` : ""}${e.kind === "splash" ? ` ${i18n("Splash").toLowerCase()}` : ""}`;
     if (!stat) {
       lines.push(`${what}: ${i18n("NoStatistic")}`);

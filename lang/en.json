@@ -44,6 +44,7 @@
   "SWE.DerivedPriceHint": "Total value computed by the system (base price + runes). Read only.",
   "SWE.TotalPriceHint": "Total price shown on the sheet. Type a custom value to override it; clear the field to go back to the automatic price.",
   "SWE.RunesPriceHint": "Value contributed by runes (automatic).",
+  "SWE.Precision": "Precision",
   "SWE.Splash": "Splash",
   "SWE.SplashHint": "hits everything within 5 ft on a hit; the target keeps it even on a miss. Uses the base damage type.",
   "SWE.FromCond": "when:",
