@@ -10,7 +10,10 @@ const SWE_COND = "SWE:C:";
 const SWE_COND_SLUG = "swe-cond";
 
 // Conditionals: "if the wielder is X, then Y".
-const COND_FILTERS = ["ancestry", "heritage", "class", "feat"];
+// "map" is not an item criterion like the others: it is per-attack state
+// (the wielder already attacked this turn). Its slug is the fixed sentinel
+// "map" and it matches through roll options, never through actor items.
+const COND_FILTERS = ["ancestry", "heritage", "class", "feat", "map"];
 const COND_EFFECTS = ["damage", "healTurn", "healHit"];
 const COND_FLAG = "conditionals";
 const COND_DONE_FLAG = "healed";
@@ -22,6 +25,9 @@ const SAVES_DONE_FLAG = "savesDone";
 // silently never fires, so every conditional tests both and the same helper
 // feeds the rule predicates and the runtime fallback.
 function critRollOptions(crit) {
+  // The attack roll publishes map:increases:1 or :2 once the wielder is past
+  // their first attack (verified live); either shape means "suffering MAP".
+  if (crit.filter === "map") return ["map:increases:1", "map:increases:2"];
   // A feat and a feature are both stored as feat items but announce themselves
   // under different prefixes, so a criterion pointing at either has to test both.
   const bases = crit.filter === "feat" ? ["feat", "feature"] : [crit.filter];
@@ -44,8 +50,18 @@ function condPredicate(c) {
 // Rule elements are evaluated by PF2e itself. Our healing hooks are not, so they
 // read the wielder's ancestry/heritage/class directly and only fall back to roll
 // options when the actor does not expose them (NPCs, synthetic actors).
-function actorMatchesCrit(actor, crit) {
+function actorMatchesCrit(actor, crit, rollOpts = []) {
   if (!actor || !crit?.slug || !COND_FILTERS.includes(crit.filter)) return false;
+  // MAP is not a property of the actor: only the triggering roll knows it.
+  // With no roll in hand (start of turn, sheet checks) it simply never holds.
+  if (crit.filter === "map") {
+    // A FIRST attack also publishes map:increases:0 (caught live), so the
+    // option existing is not enough: only a positive count means MAP.
+    return rollOpts.some((o) => {
+      const s = String(o);
+      return s.startsWith("map:increases:") && Number(s.split(":")[2]) > 0;
+    });
+  }
   if (crit.filter === "feat") {
     const feats = actor.itemTypes?.feat ?? [];
     if (feats.some((f) => (f.slug || slugOf(f.name)) === crit.slug)) return true;
@@ -71,18 +87,19 @@ function actorMatchesCrit(actor, crit) {
 
 // Several criteria on one conditional are an AND, matching the predicate the
 // rule elements get so both paths agree on what "this applies" means.
-function actorMatchesCond(actor, c) {
+function actorMatchesCond(actor, c, rollOpts = []) {
   const crits = c?.criteria ?? [];
   if (!crits.length) return false;
-  return crits.every((crit) => actorMatchesCrit(actor, crit));
+  return crits.every((crit) => actorMatchesCrit(actor, crit, rollOpts));
 }
 
 // Damage and healing carry different payloads; keeping one flat shape meant a
 // healing entry dragged a meaningless damage type around. Discriminate on effect.
 function normalizeCrit(crit) {
+  const filter = COND_FILTERS.includes(crit?.filter) ? crit.filter : "ancestry";
   return {
-    filter: COND_FILTERS.includes(crit?.filter) ? crit.filter : "ancestry",
-    slug: String(crit?.slug ?? "").trim()
+    filter,
+    slug: filter === "map" ? "map" : String(crit?.slug ?? "").trim()
   };
 }
 
@@ -170,7 +187,9 @@ async function condChoices() {
   if (_condChoiceCache) return _condChoiceCache;
   // Feats and features are both stored as items of type "feat", so ancestry
   // feats, class feats and ancestry features all land in the same bucket.
-  const out = { ancestry: [], heritage: [], class: [], feat: [] };
+  // "map" keeps an empty bucket: it is state, not something a pack can offer,
+  // but the dedupe/sort loop below walks every COND_FILTERS entry.
+  const out = { ancestry: [], heritage: [], class: [], feat: [], map: [] };
   for (const pack of game.packs ?? []) {
     if (pack.documentName !== "Item") continue;
     let index;
@@ -201,6 +220,7 @@ async function condChoices() {
 // A weapon can reference an ancestry from a pack that is no longer installed.
 // Surfacing that as "unknown" beats showing a slug and pretending it resolves.
 function condLabel(choices, crit) {
+  if (crit.filter === "map") return i18n("MapShort");
   const hit = (choices?.[crit.filter] ?? []).find((o) => o.value === crit.slug);
   return hit ? hit.label : null;
 }
@@ -670,9 +690,10 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
           index: j,
           condIndex: i,
           first: j === 0,
+          isMap: crit.filter === "map",
           display: resolved ?? crit.slug,
           resolved,
-          unknown: !!crit.slug && !resolved
+          unknown: crit.filter !== "map" && !!crit.slug && !resolved
         };
       })
     }));
@@ -1245,7 +1266,11 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     // them and shows them in the damage breakdown. They are output only: the flag
     // written below stays the source of truth and extract() never reads them back.
     const condRules = conds
-      .filter((c) => c.effect === "damage")
+      // A MAP predicate never fires on the damage selector - the damage roll's
+      // options carry no map:increases (verified live) - so conditionals with a
+      // MAP criterion are resolved by the module engine on the damage message,
+      // which can still see the attack that preceded it.
+      .filter((c) => c.effect === "damage" && !c.criteria.some((k) => k.filter === "map"))
       .map((c, i) => {
         const tl = damageTypeLabel(cfg, c.type);
         const who = c.criteria.map((crit) => crit.slug).join(" + ");
@@ -1360,7 +1385,7 @@ function isCarried(item) {
   return carry === "held" || carry === "worn";
 }
 
-function healEntriesFor(actor, timing, onlyItemId = null) {
+function healEntriesFor(actor, timing, onlyItemId = null, rollOpts = []) {
   const out = [];
   for (const item of actor?.items ?? []) {
     if (item.type !== "weapon") continue;
@@ -1368,7 +1393,7 @@ function healEntriesFor(actor, timing, onlyItemId = null) {
     if (!isCarried(item)) continue;
     for (const cond of readConds(item)) {
       if (cond.effect !== timing) continue;
-      if (!actorMatchesCond(actor, cond)) continue;
+      if (!actorMatchesCond(actor, cond, rollOpts)) continue;
       out.push({ item, cond });
     }
   }
@@ -1398,9 +1423,9 @@ async function applyHealing(actor, total) {
   await actor.update({ "system.attributes.hp.value": next });
 }
 
-async function runHealing(actor, timing, { itemId = null } = {}) {
+async function runHealing(actor, timing, { itemId = null, rollOpts = [] } = {}) {
   if (!isSoleExecutor()) return;
-  const entries = healEntriesFor(actor, timing, itemId);
+  const entries = healEntriesFor(actor, timing, itemId, rollOpts);
   if (!entries.length) return;
   // Healing a full-health wielder posted a pointless roll plus the system's
   // "already at full health" card on every hit; stay quiet instead.
@@ -1567,6 +1592,82 @@ async function runGatedSaves(attacker, item, message) {
   }
 }
 
+// The damage message knows nothing about MAP, but the attack that preceded it
+// does: walk recent messages back to the latest attack-roll by the same actor
+// with the same weapon and read map:increases off its options.
+function mapStateFor(message) {
+  const itemId = message.item?.id;
+  const actorId = message.actor?.id;
+  if (!itemId || !actorId) return 0;
+  const msgs = game.messages.contents;
+  let start = msgs.indexOf(message);
+  if (start === -1) start = msgs.length;
+  let scanned = 0;
+  for (let i = start - 1; i >= 0 && scanned < 40; i--, scanned++) {
+    const m = msgs[i];
+    const c = m.flags?.pf2e?.context;
+    if (c?.type !== "attack-roll") continue;
+    if (m.actor?.id !== actorId || m.item?.id !== itemId) continue;
+    const opt = (c.options ?? []).find((o) => String(o).startsWith("map:increases:"));
+    // First attacks say map:increases:0, so the fallback must be 0, not 1: an
+    // unparsable count treated as "has MAP" fired the rider on first attacks.
+    return opt ? Number(String(opt).split(":")[2]) || 0 : 0;
+  }
+  return 0;
+}
+
+// Damage conditionals gated on MAP cannot be native rules (their predicate
+// would never fire on the damage selector), so the module applies them here:
+// same timing as gated saves, same crit doubling, same IWR-respecting apply.
+async function runMapConds(attacker, item, message) {
+  const conds = readConds(item).filter(
+    (c) => c.effect === "damage" && c.criteria.some((k) => k.filter === "map")
+  );
+  if (!conds.length) return;
+  const mapN = mapStateFor(message);
+  if (!(mapN > 0)) return;
+  const targetRef = message.flags?.pf2e?.context?.target;
+  if (!targetRef?.actor) return;
+  let targetActor;
+  let tokenDoc = null;
+  try {
+    const doc = await fromUuid(targetRef.actor);
+    targetActor = doc?.actor ?? doc;
+    tokenDoc = targetRef.token ? await fromUuid(targetRef.token) : null;
+  } catch {
+    return;
+  }
+  if (!targetActor) return;
+  const critHit = message.flags?.pf2e?.context?.outcome === "criticalSuccess";
+  const cfg = CONFIG.PF2E ?? {};
+  const lines = [];
+  for (const c of conds) {
+    const others = c.criteria.filter((k) => k.filter !== "map");
+    if (!others.every((k) => actorMatchesCrit(attacker, k))) continue;
+    let amount = Number(c.value) || 0;
+    try {
+      if (c.die) {
+        amount = Number((await new Roll(`${c.value}${c.die}`).evaluate()).total) || 0;
+      }
+      if (critHit) amount *= 2;
+      if (!(amount > 0)) continue;
+      await targetActor.applyDamage({ damage: amount, token: tokenDoc ?? undefined, skipIWR: false });
+      const tl = damageTypeLabel(cfg, c.type);
+      lines.push(
+        `${condAmount(c)} ${tl}${c.src ? ` · ${c.src}` : ""} → ${amount} ${i18n("Applied")}${critHit ? ` (${i18n("CritMark")})` : ""}`
+      );
+    } catch (err) {
+      console.error(`${MODULE_ID} | map conditional apply failed`, err);
+    }
+  }
+  if (lines.length) {
+    await ChatMessage.create({
+      speaker: ChatMessage.getSpeaker({ actor: attacker }),
+      content: `<p><strong>${i18n("MapDamage")} (MAP ${mapN}) · ${targetActor.name}</strong></p><p>${lines.join("<br>")}</p>`
+    });
+  }
+}
+
 function canEdit(item) {
   const gmOnly = game.settings.get(MODULE_ID, "gmOnly");
   if (gmOnly) return game.user.isGM;
@@ -1647,7 +1748,7 @@ Hooks.on("createChatMessage", async (message) => {
     } catch (err) {
       console.warn(`${MODULE_ID} | could not mark message`, err);
     }
-    await runHealing(actor, "healHit", { itemId });
+    await runHealing(actor, "healHit", { itemId, rollOpts: ctx.options ?? [] });
     return;
   }
   // Saves resolve when damage is actually rolled, not on the hit: if the table
@@ -1666,5 +1767,6 @@ Hooks.on("createChatMessage", async (message) => {
       console.warn(`${MODULE_ID} | could not mark message`, err);
     }
     await runGatedSaves(actor, item, message);
+    await runMapConds(actor, item, message);
   }
 });

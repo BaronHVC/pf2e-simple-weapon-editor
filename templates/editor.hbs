@@ -342,7 +342,9 @@
             <option value="{{this.value}}" {{#if (sweEq this.value ../filter)}}selected{{/if}}>{{this.label}}</option>
             {{/each}}
           </select>
+          {{#unless this.isMap}}
           <input type="text" name="conds.{{this.condIndex}}.criteria.{{this.index}}.slugInput" value="{{this.display}}" list="swe-dl-{{this.filter}}" class="swe-cond-target" placeholder="{{localize 'SWE.CondSearchPh'}}" autocomplete="off" spellcheck="false" />
+          {{/unless}}
           <a data-action="sweRemoveCrit" data-cond="{{this.condIndex}}" data-index="{{this.index}}" title="{{localize 'SWE.Remove'}}"><i class="fa-solid fa-xmark"></i></a>
         </div>
         {{#if this.unknown}}
