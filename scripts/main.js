@@ -13,8 +13,17 @@ const SWE_COND_SLUG = "swe-cond";
 // "map" is not an item criterion like the others: it is per-attack state
 // (the wielder already attacked this turn). Its slug is the fixed sentinel
 // "map" and it matches through roll options, never through actor items.
-const COND_FILTERS = ["ancestry", "heritage", "class", "feat", "map"];
-const COND_EFFECTS = ["damage", "healTurn", "healHit"];
+const COND_FILTERS = ["ancestry", "heritage", "class", "feat", "map", "selfCondition", "targetCondition"];
+// Condition criteria test what the wielder or the target is suffering right
+// now (frightened, clumsy...). Both strike rolls publish them as
+// self:condition:<slug>[:<value>] and target:condition:<slug>[:<value>]
+// (verified on attack AND damage messages), so unlike MAP they work in native
+// rule predicates, thresholds included via gte.
+const STATE_FILTERS = ["selfCondition", "targetCondition"];
+const COND_EFFECTS = ["damage", "healTurn", "healHit", "attackBonus"];
+// Typed so the system's own stacking applies: same-type bonuses do not stack
+// with each other, untyped ones always do.
+const BONUS_TYPES = ["circumstance", "status", "item", "untyped"];
 const COND_FLAG = "conditionals";
 const HITCOND_FLAG = "hitConds";
 const COND_DONE_FLAG = "healed";
@@ -29,6 +38,7 @@ function critRollOptions(crit) {
   // The attack roll publishes map:increases:1 or :2 once the wielder is past
   // their first attack (verified live); either shape means "suffering MAP".
   if (crit.filter === "map") return ["map:increases:1", "map:increases:2"];
+  if (STATE_FILTERS.includes(crit.filter)) return [`${statePrefix(crit)}:condition:${crit.slug}`];
   // A feat and a feature are both stored as feat items but announce themselves
   // under different prefixes, so a criterion pointing at either has to test both.
   const bases = crit.filter === "feat" ? ["feat", "feature"] : [crit.filter];
@@ -45,7 +55,31 @@ function critRollOptions(crit) {
 // Entries of a PF2e predicate are ANDed, so one {or:[...]} per criterion reads
 // as "every criterion holds, each in whichever shape the system happens to use".
 function condPredicate(c) {
-  return c.criteria.map((crit) => ({ or: critRollOptions(crit) }));
+  return c.criteria.map(critPredicateTerm);
+}
+
+function statePrefix(crit) {
+  return crit.filter === "targetCondition" ? "target" : "self";
+}
+
+// A minimum value turns the plain option test into the predicate's numeric
+// form: valued conditions publish <prefix>:condition:<slug>:<n>, which gte
+// compares (verified: frightened 2 passed a >=2 rule and failed a >=3 one).
+function critPredicateTerm(crit) {
+  if (STATE_FILTERS.includes(crit.filter) && Number(crit.min) > 1) {
+    return { gte: [`${statePrefix(crit)}:condition:${crit.slug}`, Number(crit.min)] };
+  }
+  return { or: critRollOptions(crit) };
+}
+
+// Highest value among a set of condition roll options, 1 for valueless ones.
+function stateValueFromOptions(rollOpts, base) {
+  if (!rollOpts.includes(base)) return 0;
+  const vals = rollOpts
+    .filter((o) => String(o).startsWith(`${base}:`))
+    .map((o) => Number(String(o).slice(base.length + 1)))
+    .filter(Number.isFinite);
+  return vals.length ? Math.max(...vals) : 1;
 }
 
 // Rule elements are evaluated by PF2e itself. Our healing hooks are not, so they
@@ -62,6 +96,21 @@ function actorMatchesCrit(actor, crit, rollOpts = []) {
       const s = String(o);
       return s.startsWith("map:increases:") && Number(s.split(":")[2]) > 0;
     });
+  }
+  if (STATE_FILTERS.includes(crit.filter)) {
+    const min = Math.max(1, Number(crit.min) || 1);
+    const base = `${statePrefix(crit)}:condition:${crit.slug}`;
+    if (crit.filter === "targetCondition") {
+      // There is no target outside a roll, so only the roll can answer.
+      return stateValueFromOptions(rollOpts.map(String), base) >= min;
+    }
+    // The wielder's own conditions are read off the actor, so start-of-turn
+    // healing can test them too; the roll's options are the fallback.
+    const vals = (actor.itemTypes?.condition ?? [])
+      .filter((c) => c.slug === crit.slug)
+      .map((c) => Number(c.value) || 1);
+    if (vals.length) return Math.max(...vals) >= min;
+    return stateValueFromOptions(rollOpts.map(String), base) >= min;
   }
   if (crit.filter === "feat") {
     const feats = actor.itemTypes?.feat ?? [];
@@ -98,10 +147,13 @@ function actorMatchesCond(actor, c, rollOpts = []) {
 // healing entry dragged a meaningless damage type around. Discriminate on effect.
 function normalizeCrit(crit) {
   const filter = COND_FILTERS.includes(crit?.filter) ? crit.filter : "ancestry";
-  return {
+  const out = {
     filter,
     slug: filter === "map" ? "map" : String(crit?.slug ?? "").trim()
   };
+  // 0 means "any value": just having the condition is enough.
+  if (STATE_FILTERS.includes(filter)) out.min = clampInt(crit?.min, 0, 20, 0);
+  return out;
 }
 
 function normalizeCond(c) {
@@ -112,14 +164,18 @@ function normalizeCond(c) {
     Array.isArray(c?.criteria) && c.criteria.length
       ? c.criteria
       : [{ filter: c?.filter, slug: c?.slug }];
+  const isAttack = effect === "attackBonus";
   const base = {
     criteria: rawCrits.map(normalizeCrit),
     effect,
-    value: clampInt(c?.value, 1, 99, 1),
-    die: DIES.includes(c?.die) ? c.die : "",
+    // An attack modifier can be a penalty, never zero; everything else is a
+    // positive amount.
+    value: isAttack ? clampInt(c?.value, -99, 99, 1) || 1 : clampInt(c?.value, 1, 99, 1),
+    die: !isAttack && DIES.includes(c?.die) ? c.die : "",
     src: String(c?.src ?? "").trim()
   };
   if (effect === "damage") base.type = String(c?.type ?? "fire");
+  if (isAttack) base.bonusType = BONUS_TYPES.includes(c?.bonusType) ? c.bonusType : "circumstance";
   return base;
 }
 
@@ -211,7 +267,11 @@ async function condChoices() {
   // feats, class feats and ancestry features all land in the same bucket.
   // "map" keeps an empty bucket: it is state, not something a pack can offer,
   // but the dedupe/sort loop below walks every COND_FILTERS entry.
-  const out = { ancestry: [], heritage: [], class: [], feat: [], map: [] };
+  const out = { ancestry: [], heritage: [], class: [], feat: [], map: [], selfCondition: [], targetCondition: [] };
+  // Conditions come from the system's own record, not from packs.
+  const condOpts = locRecord(CONFIG.PF2E?.conditionTypes);
+  out.selfCondition = [...condOpts];
+  out.targetCondition = [...condOpts];
   for (const pack of game.packs ?? []) {
     if (pack.documentName !== "Item") continue;
     let index;
@@ -241,6 +301,15 @@ async function condChoices() {
 
 // A weapon can reference an ancestry from a pack that is no longer installed.
 // Surfacing that as "unknown" beats showing a slug and pretending it resolves.
+// One criterion as a person reads it: "target: Frightened >= 2".
+function critText(choices, crit) {
+  if (crit.filter === "map") return i18n("MapShort");
+  const label = condLabel(choices, crit) ?? crit.slug;
+  if (!STATE_FILTERS.includes(crit.filter)) return label;
+  const who = i18n(crit.filter === "targetCondition" ? "WhoTarget" : "WhoSelf");
+  return `${who}: ${label}${Number(crit.min) > 1 ? ` \u2265${crit.min}` : ""}`;
+}
+
 function condLabel(choices, crit) {
   if (crit.filter === "map") return i18n("MapShort");
   const hit = (choices?.[crit.filter] ?? []).find((o) => o.value === crit.slug);
@@ -708,7 +777,8 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       ...c,
       index: i,
       isDamage: c.effect === "damage",
-      kind: c.effect === "damage" ? "damage" : "heal",
+      isAttack: c.effect === "attackBonus",
+      kind: c.effect === "damage" ? "damage" : c.effect === "attackBonus" ? "attack" : "heal",
       dot: dotFor(c.type),
       icon: iconFor(c.type),
       headBg: tintFor(dotFor(c.type), 0.10),
@@ -724,6 +794,8 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
           condIndex: i,
           first: j === 0,
           isMap: crit.filter === "map",
+          isState: STATE_FILTERS.includes(crit.filter),
+          minVal: Number(crit.min) > 0 ? crit.min : "",
           display: resolved ?? crit.slug,
           resolved,
           unknown: crit.filter !== "map" && !!crit.slug && !resolved
@@ -742,7 +814,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         typeLabel: damageTypeLabel(cfg, c.type),
         dot: dotFor(c.type),
         icon: iconFor(c.type),
-        reason: c.src || c.criteria.map((cr) => condLabel(choices, cr) ?? cr.slug).join(" + ")
+        reason: c.src || c.criteria.map((cr) => critText(choices, cr)).join(" + ")
       }));
     const derivedGp = Number(this.item.system?.price?.value?.gp ?? 0);
     const baseGp = Number(this.item._source.system?.price?.value?.gp ?? 0);
@@ -817,7 +889,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       // list is in the thousands, so its datalist starts empty and is filled
       // with the top matches while the user types (see _onRender).
       datalists: [
-        ...["ancestry", "heritage", "class"].map((k) => ({ key: k, options: choices[k] ?? [] })),
+        ...["ancestry", "heritage", "class", ...STATE_FILTERS].map((k) => ({ key: k, options: choices[k] ?? [] })),
         { key: "rune", options: runeOpts },
         { key: "trait", options: traitOpts }
       ],
@@ -829,6 +901,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         value: e,
         label: i18n(`Effect_${e}`)
       })),
+      bonusTypeOptions: BONUS_TYPES.map((t) => ({ value: t, label: i18n(`Bonus_${t}`) })),
       preview,
       previewParts,
       baseDot: dotFor(d.damage.damageType),
@@ -987,7 +1060,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
                   e.slugInput !== undefined
                     ? resolveCritInput(this._condChoices, e.filter, e.slugInput)
                     : e.slug;
-                return { filter: e.filter, slug };
+                return { filter: e.filter, slug, min: e.min };
               })
           : [];
         arr.push(normalizeCond({ ...raw, criteria }));
@@ -1332,7 +1405,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       .filter((c) => c.effect === "damage" && !c.criteria.some((k) => k.filter === "map"))
       .map((c, i) => {
         const tl = damageTypeLabel(cfg, c.type);
-        const who = c.criteria.map((crit) => crit.slug).join(" + ");
+        const who = c.criteria.map((crit) => critText(this._condChoices, crit)).join(" + ");
         const auto = `${condAmount(c)} ${tl} · ${who}`;
         const base = {
           slug: `${SWE_COND_SLUG}-${i}`,
@@ -1360,9 +1433,33 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     // adoption into one, so any weapon with an ancestry damage conditional also
     // carries a helper rule that publishes the wielder's adopted ancestry as
     // swe-adopted:<slug>. Gated on the feat so actors without it resolve nothing.
+    // Attack modifiers are native rules too, so the attack roll's predicate
+    // needs the published adoption just as much as the damage one does.
     const needsAdopted = conds.some(
-      (c) => c.effect === "damage" && c.criteria.some((k) => k.filter === "ancestry")
+      (c) =>
+        (c.effect === "damage" || c.effect === "attackBonus") &&
+        c.criteria.some((k) => k.filter === "ancestry")
     );
+    // Attack modifiers live entirely in native FlatModifiers on this weapon's
+    // attack selector: every criterion, MAP included, is visible to the attack
+    // roll's predicate (verified - MAP is on the attack roll even though the
+    // damage roll lacks it), so none of these need the module engine.
+    const atkRules = conds
+      .filter((c) => c.effect === "attackBonus")
+      .map((c, i) => {
+        const who = c.criteria.map((crit) => critText(this._condChoices, crit)).join(" + ");
+        const signed = c.value > 0 ? `+${c.value}` : `${c.value}`;
+        return {
+          key: "FlatModifier",
+          slug: `${SWE_COND_SLUG}-atk-${i}`,
+          selector: "{item|id}-attack",
+          type: c.bonusType,
+          value: c.value,
+          predicate: condPredicate(c),
+          hideIfDisabled: true,
+          label: c.src || `${signed} ${i18n(`Bonus_${c.bonusType}`)} \u00b7 ${who}`
+        };
+      });
     const helperRules = needsAdopted
       ? [
           {
@@ -1394,7 +1491,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       "system.runes.striking": Number(d.runes.striking) || 0,
       "system.runes.property": [...d.runes.property],
       "system.traits.value": [...d.traits],
-      "system.rules": [...keep, ...sweRules, ...persRules, ...helperRules, ...condRules],
+      "system.rules": [...keep, ...sweRules, ...persRules, ...helperRules, ...condRules, ...atkRules],
       [`flags.${MODULE_ID}.${COND_FLAG}`]: conds,
       [`flags.${MODULE_ID}.${HITCOND_FLAG}`]: d.hitConds.filter((h) => h.condition)
     };
@@ -1703,7 +1800,8 @@ async function runMapConds(attacker, item, message) {
   const lines = [];
   for (const c of conds) {
     const others = c.criteria.filter((k) => k.filter !== "map");
-    if (!others.every((k) => actorMatchesCrit(attacker, k))) continue;
+    const ctxOpts = message.flags?.pf2e?.context?.options ?? [];
+    if (!others.every((k) => actorMatchesCrit(attacker, k, ctxOpts))) continue;
     let amount = Number(c.value) || 0;
     try {
       if (c.die) {

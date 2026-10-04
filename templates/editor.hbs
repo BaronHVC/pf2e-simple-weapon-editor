@@ -349,7 +349,7 @@
     {{#each condIndexed}}
     <div class="swe-card swe-kind-{{this.kind}}">
       <div class="swe-card-head"{{#if this.isDamage}} style="background: {{this.headBg}}"{{/if}}>
-        <span class="swe-fx-icon"{{#if this.isDamage}} style="color: {{this.dot}}; background: {{this.iconBg}}; border-color: {{this.iconBorder}}"{{/if}}>{{#if this.isDamage}}<i class="fa-solid {{this.icon}}"></i>{{else}}<i class="fa-solid fa-heart"></i>{{/if}}</span>
+        <span class="swe-fx-icon"{{#if this.isDamage}} style="color: {{this.dot}}; background: {{this.iconBg}}; border-color: {{this.iconBorder}}"{{/if}}>{{#if this.isDamage}}<i class="fa-solid {{this.icon}}"></i>{{else}}{{#if this.isAttack}}<i class="fa-solid fa-crosshairs"></i>{{else}}<i class="fa-solid fa-heart"></i>{{/if}}{{/if}}</span>
         <select name="conds.{{this.index}}.effect" class="swe-fx-select">
           {{#each ../effectOptions}}
           <option value="{{this.value}}" {{#if (sweEq this.value ../effect)}}selected{{/if}}>{{this.label}}</option>
@@ -362,7 +362,17 @@
           {{/each}}
         </select>
         {{/if}}
+        {{#if this.isAttack}}
+        <select name="conds.{{this.index}}.bonusType" title="{{localize 'SWE.BonusTypeHint'}}">
+          {{#each ../bonusTypeOptions}}
+          <option value="{{this.value}}" {{#if (sweEq this.value ../bonusType)}}selected{{/if}}>{{this.label}}</option>
+          {{/each}}
+        </select>
+        {{/if}}
         <span class="swe-card-amount">
+          {{#if this.isAttack}}
+          <input type="number" name="conds.{{this.index}}.value" value="{{this.value}}" min="-99" max="99" step="1" class="swe-narrow" title="{{localize 'SWE.BonusValueHint'}}" />
+          {{else}}
           <input type="number" name="conds.{{this.index}}.value" value="{{this.value}}" min="1" max="99" step="1" class="swe-narrow" />
           <select name="conds.{{this.index}}.die">
             <option value="" {{#unless this.die}}selected{{/unless}}>{{localize "SWE.Fixed"}}</option>
@@ -370,6 +380,7 @@
             <option value="{{this}}" {{#if (sweEq this ../die)}}selected{{/if}}>{{this}}</option>
             {{/each}}
           </select>
+          {{/if}}
         </span>
         <a class="swe-rowdel" data-action="sweRemoveCond" data-index="{{this.index}}" title="{{localize 'SWE.RemoveCond'}}"><i class="fa-solid fa-trash"></i></a>
       </div>
@@ -387,6 +398,9 @@
           {{#unless this.isMap}}
           <input type="text" name="conds.{{this.condIndex}}.criteria.{{this.index}}.slugInput" value="{{this.display}}" list="swe-dl-{{this.filter}}" class="swe-cond-target" placeholder="{{localize 'SWE.CondSearchPh'}}" autocomplete="off" spellcheck="false" />
           {{/unless}}
+          {{#if this.isState}}
+          <input type="number" name="conds.{{this.condIndex}}.criteria.{{this.index}}.min" value="{{this.minVal}}" min="0" max="20" step="1" class="swe-narrow swe-min" placeholder="{{localize 'SWE.MinPh'}}" title="{{localize 'SWE.MinHint'}}" />
+          {{/if}}
           <a data-action="sweRemoveCrit" data-cond="{{this.condIndex}}" data-index="{{this.index}}" title="{{localize 'SWE.Remove'}}"><i class="fa-solid fa-xmark"></i></a>
         </div>
         {{#if this.unknown}}

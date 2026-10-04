@@ -3,7 +3,7 @@
   "configurations": [
     {
       "name": "foundry-sandbox",
-      "runtimeExecutable": "C:\Program Files\Foundry Virtual Tabletop\Foundry Virtual Tabletop.exe",
+      "runtimeExecutable": "C:/Program Files/Foundry Virtual Tabletop/Foundry Virtual Tabletop.exe",
       "runtimeArgs": [],
       "port": 30000
     }

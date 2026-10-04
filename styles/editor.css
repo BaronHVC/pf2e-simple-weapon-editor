@@ -698,3 +698,14 @@
 }
 .swe-editor .swe-title-hconds { color: #c792ea; }
 .swe-editor .swe-ghost-hconds { color: #c792ea; border-color: #8a6a9e; }
+
+.swe-editor .swe-kind-attack .swe-card-head { background: rgba(111, 168, 220, 0.10); }
+.swe-editor .swe-kind-attack .swe-fx-icon {
+  color: #6fa8dc;
+  background: rgba(111, 168, 220, 0.16);
+  border: 1px solid rgba(111, 168, 220, 0.5);
+}
+.swe-editor .swe-cond-when > .swe-min {
+  flex: 0 0 auto !important;
+  width: 54px !important;
+}
