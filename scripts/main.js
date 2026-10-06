@@ -196,6 +196,16 @@ function normalizeSave(e) {
   };
 }
 
+// An extra marked "to choose" is asked about before every attack. Its stable
+// key survives saves (it rides on the rule as swePick and in a hidden input),
+// so the remembered choice keeps pointing at the same row.
+function normalizePick(e) {
+  return {
+    pick: e?.pick === true || e?.pick === "true" || e?.pick === "on",
+    pickKey: String(e?.pickKey || "") || foundry.utils.randomID(8)
+  };
+}
+
 function condAmount(c) {
   return c.die ? `${c.value}${c.die}` : `${c.value}`;
 }
@@ -597,13 +607,15 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         saveDcMode: r.sweSave?.mode,
         saveOut: r.sweSave?.out
       });
+      const pick = normalizePick({ pick: !!r.swePick, pickKey: r.swePick });
       if (r.key === "DamageDice") {
         dest.push({
           value: r.diceNumber ?? 1,
           die: r.dieSize ?? "d6",
           type: isPrecision ? "precision" : (r.damageType ?? "fire"),
           src: srcLabel,
-          ...save
+          ...save,
+          ...pick
         });
       } else if (r.key === "FlatModifier") {
         dest.push({
@@ -611,7 +623,8 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
           die: "",
           type: isPrecision ? "precision" : (r.damageType ?? "fire"),
           src: srcLabel,
-          ...save
+          ...save,
+          ...pick
         });
       }
     }
@@ -722,7 +735,10 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     for (const e of d.extras) {
       const tl = damageTypeLabel(cfg, e.type);
       previewParts.push({
-        text: (e.die ? ` + ${e.value}${e.die} ${tl}` : ` + ${e.value} ${tl}`) + gateMark(e),
+        text:
+          (e.die ? ` + ${e.value}${e.die} ${tl}` : ` + ${e.value} ${tl}`) +
+          gateMark(e) +
+          (e.pick ? ` [${i18n("PickShort")}]` : ""),
         color: dotFor(e.type)
       });
     }
@@ -1006,7 +1022,8 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
           die: e.die ?? "",
           type: e.type ?? "fire",
           src: String(e.src ?? "").trim(),
-          ...normalizeSave(e)
+          ...normalizeSave(e),
+          ...normalizePick(e)
         });
       }
       d.extras = arr;
@@ -1076,7 +1093,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
 
   static actAddDamage(event, target) {
     this.syncFromForm();
-    this.data.extras.push({ value: 1, die: "d6", type: "fire", src: "", ...normalizeSave({}) });
+    this.data.extras.push({ value: 1, die: "d6", type: "fire", src: "", ...normalizeSave({}), ...normalizePick({}) });
     this.render();
   }
 
@@ -1299,12 +1316,13 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         label: `${SWE_MARK}N:`
       });
     };
-    const persRules = (nativePers ? d.persistents.slice(1) : d.persistents).map((e) => {
+    const persRules = (nativePers ? d.persistents.slice(1) : d.persistents).map((e, i) => {
       const tl = labelFor(cfg.damageTypes, e.type);
       let rule;
       if (e.die) {
         rule = {
           key: "DamageDice",
+          slug: `swe-p-${i}`,
           selector: "{item|id}-damage",
           diceNumber: Number(e.value) || 1,
           dieSize: e.die,
@@ -1315,6 +1333,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       } else {
         rule = {
           key: "FlatModifier",
+          slug: `swe-p-${i}`,
           selector: "{item|id}-damage",
           value: Number(e.value) || 1,
           damageType: e.type,
@@ -1335,13 +1354,19 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     // Entries with a save also emit a companion Note: the damage card then
     // carries the system's own clickable @Check button, and the table applies
     // full, half or none with the card's standard buttons.
-    const mkDamageRule = (e, splash) => {
+    // Every emitted damage rule gets its own slug. Without one the system
+    // derives it from the label and dedupes modifiers by slug before testing
+    // predicates, so two identical rows ("+5 Sonic" twice) silently collapsed
+    // into one (verified: 5 sonic instead of 10).
+    const mkDamageRule = (e, splash, i) => {
       const tl = damageTypeLabel(cfg, e.type);
       const precision = e.type === "precision";
+      const slug = `swe-${splash ? "s" : "x"}-${i}`;
       let rule;
       if (e.die) {
         rule = {
           key: "DamageDice",
+          slug,
           selector: "{item|id}-damage",
           diceNumber: Number(e.value) || 1,
           dieSize: e.die,
@@ -1353,6 +1378,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       } else {
         rule = {
           key: "FlatModifier",
+          slug,
           selector: "{item|id}-damage",
           value: Number(e.value) || 1,
           label: mkLabel(SWE_MARK, e, tl)
@@ -1367,11 +1393,21 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         rule.hideIfDisabled = true;
         mkSaveNote(e, tl, splash ? "splash" : "");
       }
+      // A chosen extra only enters a roll whose options carry its key, which
+      // the strike wrapper injects from the pre-attack dialog. A gated one
+      // stays inert in the roll either way: the save engine checks the key.
+      if (!splash && e.pick) {
+        rule.swePick = e.pickKey;
+        if (!e.saveType) {
+          rule.predicate = [pickOption(e.pickKey)];
+          rule.hideIfDisabled = true;
+        }
+      }
       return rule;
     };
     const sweRules = [
-      ...d.extras.map((e) => mkDamageRule(e, false)),
-      ...d.splashes.map((e) => mkDamageRule(e, true)),
+      ...d.extras.map((e, i) => mkDamageRule(e, false, i)),
+      ...d.splashes.map((e, i) => mkDamageRule(e, true, i)),
       ...saveNotes
     ];
     // Splash without its trait does nothing, so setting an amount brings the
@@ -1398,10 +1434,11 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     // them and shows them in the damage breakdown. They are output only: the flag
     // written below stays the source of truth and extract() never reads them back.
     const condRules = conds
-      // A MAP predicate never fires on the damage selector - the damage roll's
-      // options carry no map:increases (verified live) - so conditionals with a
-      // MAP criterion are resolved by the module engine on the damage message,
-      // which can still see the attack that preceded it.
+      // A native MAP predicate would be inconsistent on damage: rolled from the
+      // attack card, the damage carries map:increases (the card forwards it),
+      // but rolled from the sheet it does not (verified live). Conditionals
+      // with a MAP criterion are therefore resolved by the module engine,
+      // which reads the count off the damage message or the attack before it.
       .filter((c) => c.effect === "damage" && !c.criteria.some((k) => k.filter === "map"))
       .map((c, i) => {
         const tl = damageTypeLabel(cfg, c.type);
@@ -1455,6 +1492,10 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
           selector: "{item|id}-attack",
           type: c.bonusType,
           value: c.value,
+          // Under Automatic Bonus Progression the system drops item-typed
+          // modifiers that come from equipment; a bonus the GM configured on
+          // purpose should not vanish silently.
+          fromEquipment: false,
           predicate: condPredicate(c),
           hideIfDisabled: true,
           label: c.src || `${signed} ${i18n(`Bonus_${c.bonusType}`)} \u00b7 ${who}`
@@ -1634,7 +1675,8 @@ function readGatedEntries(item) {
     out.push({
       value: r.key === "DamageDice" ? (r.diceNumber ?? 1) : (r.value ?? 1),
       die: r.key === "DamageDice" ? (r.dieSize ?? "d6") : "",
-      type: r.damageType ?? "fire",
+      type: r.category === "precision" || r.damageCategory === "precision" ? "precision" : (r.damageType ?? "fire"),
+      pick: r.swePick ?? null,
       kind,
       save: {
         type: r.sweSave.type,
@@ -1675,7 +1717,10 @@ async function runGatedSaves(attacker, item, message) {
   const critHit = message.flags?.pf2e?.context?.outcome === "criticalSuccess";
   const cfg = CONFIG.PF2E ?? {};
   const lines = [];
+  const ctxOpts = (message.flags?.pf2e?.context?.options ?? []).map(String);
   for (const e of entries) {
+    // A chosen extra that was not picked for this attack never existed for it.
+    if (e.pick && !ctxOpts.includes(pickOption(e.pick))) continue;
     const dc =
       e.save.mode === "auto"
         ? Number(attacker.system?.attributes?.classOrSpellDC?.value) || 0
@@ -1749,10 +1794,20 @@ async function runGatedSaves(attacker, item, message) {
   }
 }
 
-// The damage message knows nothing about MAP, but the attack that preceded it
-// does: walk recent messages back to the latest attack-roll by the same actor
-// with the same weapon and read map:increases off its options.
+// MAP count for a damage roll. Rolled from the attack card, the damage carries
+// map:increases itself (most exact: right even when damage is rolled out of
+// order). Rolled from the sheet it does not, so walk back to the latest
+// attack-roll by the same actor with the same weapon.
+function mapCountFromOptions(opts) {
+  const opt = (opts ?? []).find((o) => String(o).startsWith("map:increases:"));
+  // First attacks say map:increases:0, so the fallback must be 0, not 1: an
+  // unparsable count treated as "has MAP" fired the rider on first attacks.
+  return opt === undefined ? null : Number(String(opt).split(":")[2]) || 0;
+}
+
 function mapStateFor(message) {
+  const own = mapCountFromOptions(message.flags?.pf2e?.context?.options);
+  if (own !== null) return own;
   const itemId = message.item?.id;
   const actorId = message.actor?.id;
   if (!itemId || !actorId) return 0;
@@ -1765,17 +1820,14 @@ function mapStateFor(message) {
     const c = m.flags?.pf2e?.context;
     if (c?.type !== "attack-roll") continue;
     if (m.actor?.id !== actorId || m.item?.id !== itemId) continue;
-    const opt = (c.options ?? []).find((o) => String(o).startsWith("map:increases:"));
-    // First attacks say map:increases:0, so the fallback must be 0, not 1: an
-    // unparsable count treated as "has MAP" fired the rider on first attacks.
-    return opt ? Number(String(opt).split(":")[2]) || 0 : 0;
+    return mapCountFromOptions(c.options) ?? 0;
   }
   return 0;
 }
 
-// Damage conditionals gated on MAP cannot be native rules (their predicate
-// would never fire on the damage selector), so the module applies them here:
-// same timing as gated saves, same crit doubling, same IWR-respecting apply.
+// Damage conditionals gated on MAP are not native rules (see condRules), so the
+// module applies them here: same timing as gated saves, same crit doubling,
+// same IWR-respecting apply.
 async function runMapConds(attacker, item, message) {
   const conds = readConds(item).filter(
     (c) => c.effect === "damage" && c.criteria.some((k) => k.filter === "map")
@@ -1902,6 +1954,161 @@ async function runHitConditions(attacker, item, message) {
   }
 }
 
+/* -------------------------------------------------------------------------- */
+/*  Damage choice before each attack                                          */
+/*                                                                            */
+/*  PF2e has no hook before a strike (only pf2e.damageRoll, after the fact),  */
+/*  so the module wraps CharacterPF2e#prepareStrike, which rebuilds every     */
+/*  strike on each data prep, and replaces its attack and damage functions.   */
+/*  The attack wrapper asks which "to choose" extras to add and passes them   */
+/*  as roll options - the supported per-roll channel, which reaches the       */
+/*  DamageDice predicates. The attack message stores those options, and the  */
+/*  chat card hands them to the damage roll as checkContext but does NOT     */
+/*  re-apply them (verified), so the damage wrapper re-injects them: each    */
+/*  hit keeps its own choice even when damage is rolled out of order.        */
+/* -------------------------------------------------------------------------- */
+
+const PICK_MADE = "swe-pick-made";
+const PICK_FLAG = "lastPicks";
+
+function pickOption(key) {
+  return `swe-pick:${key}`;
+}
+
+function pickableEntries(item) {
+  const out = [];
+  for (const r of item?._source?.system?.rules ?? []) {
+    if (!r?.swePick || !isSweRule(r) || isCondRule(r)) continue;
+    if (r.key !== "DamageDice" && r.key !== "FlatModifier") continue;
+    let src = typeof r.label === "string" ? r.label.slice(SWE_MARK.length).trim() : "";
+    if (AUTO_LABEL_RE.test(src)) src = "";
+    out.push({
+      key: r.swePick,
+      value: r.key === "DamageDice" ? (r.diceNumber ?? 1) : (r.value ?? 1),
+      die: r.key === "DamageDice" ? (r.dieSize ?? "d6") : "",
+      type: r.category === "precision" || r.damageCategory === "precision" ? "precision" : (r.damageType ?? "fire"),
+      src,
+      gated: !!r.sweSave?.type
+    });
+  }
+  return out;
+}
+
+function lastPicksOf(item, entries = pickableEntries(item)) {
+  const raw = item?.flags?.[MODULE_ID]?.[PICK_FLAG];
+  const keys = new Set(entries.map((e) => e.key));
+  return Array.isArray(raw) ? raw.filter((k) => keys.has(k)) : [];
+}
+
+function escHTML(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+// Resolves to the picked keys; anything else means the attack was called off.
+async function askPicks(item, entries) {
+  const last = new Set(lastPicksOf(item, entries));
+  const cfg = CONFIG.PF2E ?? {};
+  const rows = entries
+    .map((e) => {
+      const color = dotFor(e.type);
+      const extra = [e.src ? escHTML(e.src) : "", e.gated ? i18n("SaveShort") : ""].filter(Boolean).join(" \u00b7 ");
+      return `<label class="swe-pick-row">
+        <input type="checkbox" name="${escHTML(e.key)}" ${last.has(e.key) ? "checked" : ""} />
+        <i class="fa-solid ${iconFor(e.type)}" style="color: ${color}"></i>
+        <span class="swe-pick-amount" style="color: ${color}">+${escHTML(condAmount(e))} ${escHTML(damageTypeLabel(cfg, e.type))}</span>
+        ${extra ? `<span class="swe-pick-src">${extra}</span>` : ""}
+      </label>`;
+    })
+    .join("");
+  const DialogV2 = foundry.applications.api.DialogV2;
+  return DialogV2.wait({
+    window: { title: `${i18n("PickTitle")}: ${item.name}`, icon: "fa-solid fa-hand-pointer" },
+    classes: ["swe-pick-dialog"],
+    content: `<p class="swe-pick-hint">${i18n("PickHint")}</p><div class="swe-pick-list">${rows}</div>`,
+    buttons: [
+      {
+        action: "attack",
+        label: i18n("PickConfirm"),
+        icon: "fa-solid fa-dice-d20",
+        default: true,
+        callback: (event, button) =>
+          [...button.form.querySelectorAll('input[type="checkbox"]')].filter((i) => i.checked).map((i) => i.name)
+      },
+      { action: "cancel", label: i18n("PickCancel"), icon: "fa-solid fa-xmark", callback: () => null }
+    ],
+    rejectClose: false
+  });
+}
+
+async function rememberPicks(item, picks) {
+  const prev = lastPicksOf(item);
+  if (prev.length === picks.length && prev.every((k) => picks.includes(k))) return;
+  try {
+    await item.setFlag(MODULE_ID, PICK_FLAG, picks);
+  } catch (err) {
+    console.warn(`${MODULE_ID} | could not remember the damage choice`, err);
+  }
+}
+
+function withOptions(params, extra) {
+  const base = params?.options instanceof Set ? [...params.options] : [...(params?.options ?? [])];
+  return { ...params, options: [...base, ...extra] };
+}
+
+function decorateStrike(strike) {
+  const item = strike?.item;
+  if (!item || item.type !== "weapon" || strike._swePicks) return;
+  if (!pickableEntries(item).length) return;
+  strike._swePicks = true;
+  for (const variant of strike.variants ?? []) {
+    const orig = variant.roll;
+    if (typeof orig !== "function") continue;
+    variant.roll = async (params = {}) => {
+      // Formula previews and other view-only calls must never open a dialog.
+      if (params.getFormula) {
+        return orig(withOptions(params, [PICK_MADE, ...lastPicksOf(item).map(pickOption)]));
+      }
+      const entries = pickableEntries(item);
+      const picks = await askPicks(item, entries);
+      // DialogV2 resolves to the button's action name when a callback returns
+      // null ("cancel", caught live) and to null when the window is closed, so
+      // anything but a list of keys aborts the attack.
+      if (!Array.isArray(picks)) return null;
+      await rememberPicks(item, picks);
+      return orig(withOptions(params, [PICK_MADE, ...picks.map(pickOption)]));
+    };
+  }
+  // The system aliases these to the first variant once, at build time.
+  if (strike.variants?.[0]) strike.roll = strike.attack = strike.variants[0].roll;
+  for (const key of ["damage", "critical"]) {
+    const orig = strike[key];
+    if (typeof orig !== "function") continue;
+    strike[key] = async (params = {}) => {
+      const ctx = [...(params.checkContext?.options ?? [])].map(String);
+      const picks = ctx.includes(PICK_MADE)
+        ? ctx.filter((o) => o.startsWith("swe-pick:"))
+        : lastPicksOf(item).map(pickOption);
+      return orig(withOptions(params, [PICK_MADE, ...picks]));
+    };
+  }
+}
+
+function installStrikeWrapper() {
+  const proto = CONFIG.PF2E?.Actor?.documentClasses?.character?.prototype;
+  if (!proto?.prepareStrike || proto._sweStrikeWrapped) return;
+  const orig = proto.prepareStrike;
+  proto.prepareStrike = function (...args) {
+    const strike = orig.apply(this, args);
+    try {
+      decorateStrike(strike);
+    } catch (err) {
+      console.warn(`${MODULE_ID} | strike wrapper`, err);
+    }
+    return strike;
+  };
+  proto._sweStrikeWrapped = true;
+}
+
 function canEdit(item) {
   const gmOnly = game.settings.get(MODULE_ID, "gmOnly");
   if (gmOnly) return game.user.isGM;
@@ -1935,6 +2142,7 @@ function injectButton(sheet) {
 }
 
 Hooks.once("init", () => {
+  installStrikeWrapper();
   game.settings.register(MODULE_ID, "gmOnly", {
     name: "SWE.SettingGmOnly",
     hint: "SWE.SettingGmOnlyHint",
@@ -1949,6 +2157,11 @@ Hooks.once("init", () => {
 Hooks.once("ready", () => {
   const mod = game.modules.get(MODULE_ID);
   if (mod) mod.api = { open: (item) => SimpleWeaponEditor.open(item) };
+  // Idempotent second chance in case CONFIG.PF2E was not ready at init.
+  if (!CONFIG.PF2E?.Actor?.documentClasses?.character?.prototype?._sweStrikeWrapped) {
+    installStrikeWrapper();
+    for (const actor of game.actors ?? []) if (actor.type === "character") actor.reset();
+  }
   console.log(`${MODULE_ID} | ready`);
 });
 

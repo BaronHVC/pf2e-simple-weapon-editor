@@ -709,3 +709,35 @@
   flex: 0 0 auto !important;
   width: 54px !important;
 }
+
+.swe-editor .swe-pickbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: 0 0 auto;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.swe-editor .swe-pickbox input { margin: 0; }
+.swe-pick-dialog .swe-pick-hint {
+  margin: 0 0 8px;
+  font-size: 0.9em;
+  opacity: 0.8;
+}
+.swe-pick-dialog .swe-pick-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.swe-pick-dialog .swe-pick-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.swe-pick-dialog .swe-pick-row:hover { background: rgba(255, 255, 255, 0.05); }
+.swe-pick-dialog .swe-pick-amount { font-weight: 600; }
+.swe-pick-dialog .swe-pick-src { font-style: italic; opacity: 0.65; }

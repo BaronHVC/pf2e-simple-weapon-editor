@@ -96,6 +96,11 @@
         </select>
         {{/if}}
         <input type="text" name="extras.{{this.index}}.src" value="{{this.src}}" placeholder="{{localize 'SWE.SourcePh'}}" class="swe-src" />
+        <label class="swe-pickbox" title="{{localize 'SWE.PickRowHint'}}">
+          <input type="checkbox" name="extras.{{this.index}}.pick" {{#if this.pick}}checked{{/if}} />
+          <i class="fa-solid fa-hand-pointer"></i>
+        </label>
+        <input type="hidden" name="extras.{{this.index}}.pickKey" value="{{this.pickKey}}" />
         <a class="swe-rowdel" data-action="sweRemoveDamage" data-index="{{this.index}}" title="{{localize 'SWE.Remove'}}"><i class="fa-solid fa-trash"></i></a>
       </div>
       {{/each}}
