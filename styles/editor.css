@@ -604,11 +604,16 @@
 }
 .swe-editor .swe-card .swe-cond-when > select {
   flex: 0 1 auto;
-  max-width: 200px;
+  max-width: 330px;
   min-width: 90px;
 }
 .swe-editor .swe-card .swe-cond-when > .swe-cond-target {
   flex: 1 1 90px;
+}
+/* A criterion with nothing to search (MAP) lets its long label use the row. */
+.swe-editor .swe-card .swe-cond-when:not(:has(.swe-cond-target)) > select {
+  flex: 1 1 auto;
+  max-width: none;
 }
 .swe-editor .swe-card .swe-cond-note { padding: 0 10px 8px; }
 

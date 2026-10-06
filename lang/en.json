@@ -72,7 +72,7 @@
   "SWE.NoteHalf": "Roll the save, then the damage button: full on a failure, half on a success, none on a critical success.",
   "SWE.NoteNone": "Only on a failed save, roll the damage button and apply it.",
   "SWE.HitCondsHead": "Conditions on hit",
-  "SWE.HitCondsHint": "conditions applied when the strike connects",
+  "SWE.HitCondsHint": "conditions applied when the strike's damage is rolled",
   "SWE.HitCondsAdd": "Condition",
   "SWE.HitWho_target": "to the target",
   "SWE.HitWho_wielder": "to the wielder",
@@ -134,5 +134,8 @@
   "SWE.Effect_healTurn": "healing at the start of the turn",
   "SWE.Effect_healHit": "healing on a hit",
   "SWE.HealTurn": "Healing from carried weapon",
-  "SWE.HealHit": "Healing on hit"
+  "SWE.HealHit": "Healing on hit",
+  "SWE.AlreadyHas": "already had it",
+  "SWE.CondInert": "Start-of-turn healing has no attack or target to check, so this requirement never holds there.",
+  "SWE.AfterIWR": "after immunities and resistances"
 }

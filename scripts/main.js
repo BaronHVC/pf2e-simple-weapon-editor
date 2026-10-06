@@ -27,7 +27,11 @@ const BONUS_TYPES = ["circumstance", "status", "item", "untyped"];
 const COND_FLAG = "conditionals";
 const HITCOND_FLAG = "hitConds";
 const COND_DONE_FLAG = "healed";
-const SAVES_DONE_FLAG = "savesDone";
+// Riders (gated saves, MAP damage, conditions on hit) run once per ATTACK: the
+// mark lives on the attack message, so clicking Damage and then Critical, or
+// rolling damage twice, does not apply them again. Damage with no attack to
+// pair with (rolled straight from the sheet) is marked on itself.
+const RIDERS_DONE_FLAG = "ridersDone";
 
 // PF2e is not uniform here: ancestry sets `self:ancestry:<slug>`, class sets
 // `class:<slug>` with no `self:` prefix at all, and heritage sets the bare form
@@ -106,9 +110,12 @@ function actorMatchesCrit(actor, crit, rollOpts = []) {
     }
     // The wielder's own conditions are read off the actor, so start-of-turn
     // healing can test them too; the roll's options are the fallback.
-    const vals = (actor.itemTypes?.condition ?? [])
-      .filter((c) => c.slug === crit.slug)
-      .map((c) => Number(c.value) || 1);
+    // actor.conditions includes in-memory grants (prone and grabbed grant
+    // off-guard that way) and, like the native self:condition options, counts
+    // conditions another one overrides.
+    const found = actor.conditions?.bySlug?.(crit.slug) ??
+      (actor.itemTypes?.condition ?? []).filter((c) => c.slug === crit.slug);
+    const vals = [...found].map((c) => Number(c.value) || 1);
     if (vals.length) return Math.max(...vals) >= min;
     return stateValueFromOptions(rollOpts.map(String), base) >= min;
   }
@@ -253,10 +260,19 @@ function normalizeHitCond(h) {
   };
 }
 
+// Persistent damage needs a formula and a type, which a bare condition entry
+// cannot carry; created as-is it never deals damage. Persistent rows in the
+// Damage tab are the way to inflict it.
+const HITCOND_EXCLUDED = new Set(["persistent-damage"]);
+
 function readHitConds(item) {
   const raw = item?._source?.flags?.[MODULE_ID]?.[HITCOND_FLAG];
   if (!Array.isArray(raw)) return [];
-  return raw.map(normalizeHitCond).filter((h) => h.condition);
+  return raw.map(normalizeHitCond).filter((h) => h.condition && !HITCOND_EXCLUDED.has(h.condition));
+}
+
+function isValuedCondition(slug) {
+  return !!game.pf2e?.ConditionManager?.conditions?.get?.(slug)?.system?.value?.isValued;
 }
 
 function slugOf(name) {
@@ -431,6 +447,9 @@ function propertyRuneRecord() {
 const AUTO_LABEL_RE = /^\+\d+(d\d+)?\s/;
 
 function clampInt(v, min, max, fallback) {
+  // FormDataExtended hands an emptied number input over as null, and
+  // Number(null) is 0: without this a cleared DC became DC 1.
+  if (v === null || v === undefined || (typeof v === "string" && v.trim() === "")) return fallback;
   const n = Number(v);
   if (!Number.isFinite(n)) return fallback;
   return Math.min(max, Math.max(min, Math.trunc(n)));
@@ -811,7 +830,12 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
           first: j === 0,
           isMap: crit.filter === "map",
           isState: STATE_FILTERS.includes(crit.filter),
+          // Valueless conditions publish no :<n> option, so a minimum on them
+          // would make the criterion unreachable.
+          showMin: STATE_FILTERS.includes(crit.filter) && (!crit.slug || isValuedCondition(crit.slug)),
           minVal: Number(crit.min) > 0 ? crit.min : "",
+          // Start-of-turn healing has no attack and no target to look at.
+          inert: c.effect === "healTurn" && (crit.filter === "map" || crit.filter === "targetCondition"),
           display: resolved ?? crit.slug,
           resolved,
           unknown: crit.filter !== "map" && !!crit.slug && !resolved
@@ -873,11 +897,12 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
           label: game.i18n.localize(v?.label ?? k)
         }))
       ],
-      conditionOptions: locRecord(cfg.conditionTypes),
+      conditionOptions: locRecord(cfg.conditionTypes).filter((o) => !HITCOND_EXCLUDED.has(o.value)),
       hitCondsIndexed: d.hitConds.map((h, i) => ({
         ...h,
         index: i,
-        label: labelFor(cfg.conditionTypes, h.condition)
+        label: labelFor(cfg.conditionTypes, h.condition),
+        valued: isValuedCondition(h.condition)
       })),
       dmgCondRows,
       persIndexed: d.persistents.map((e, i) => ({ ...e, index: i, dot: dotFor(e.type), icon: iconFor(e.type) })),
@@ -987,11 +1012,15 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       if (!isCondFilter(el)) continue;
       el.addEventListener("change", () => {
         const [, ci, , j] = el.name.split(".");
+        const prev = this.data.conditionals[Number(ci)]?.criteria?.[Number(j)]?.filter;
         this.syncFromForm();
         const crit = this.data.conditionals[Number(ci)]?.criteria?.[Number(j)];
         if (crit) {
+          // Wielder and target condition criteria share one list, so the
+          // picked condition stays valid when switching between them.
+          const keep = STATE_FILTERS.includes(prev) && STATE_FILTERS.includes(el.value);
           crit.filter = el.value;
-          crit.slug = "";
+          if (!keep) crit.slug = "";
         }
         this.render();
       });
@@ -1294,7 +1323,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     // system draws no link between a save result and a damage card (verified
     // by rolling both), so keeping gated damage in the main roll made "the
     // system knows they saved" impossible.
-    const mkSaveNote = (e, tl, kind) => {
+    const mkSaveNote = (e, tl, kind, predicate = null) => {
       if (!e.saveType) return;
       const basic = e.saveOut === "half" ? "|basic:true" : "";
       const clause = i18n(e.saveOut === "half" ? "NoteHalf" : "NoteNone");
@@ -1304,11 +1333,20 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
           : e.saveDc;
       const roll = e.die ? `${e.value}${e.die}` : `${e.value}`;
       const dmgType = kind === "persistent" ? `persistent,${e.type}` : e.type;
-      const dmgPart = e.type === "precision" ? `@Damage[(${roll})]` : `@Damage[(${roll})[${dmgType}]]`;
+      // Precision is a component of the weapon's own damage type, written the
+      // way the system writes it, so precision immunity and the type's
+      // resistances still apply when the table uses the button.
+      const dmgPart =
+        e.type === "precision"
+          ? `@Damage[(${roll}[precision])[${d.damage.damageType || "untyped"}]]`
+          : `@Damage[(${roll})[${dmgType}]]`;
       const suffix = kind === "persistent" ? ` ${i18n("PersistentShort")}` : kind === "splash" ? ` ${i18n("Splash").toLowerCase()}` : "";
       saveNotes.push({
         key: "Note",
         selector: "{item|id}-damage",
+        // A "to choose" row the player declined must not leave its buttons on
+        // the card: the note is gated on the same option as the damage.
+        ...(predicate ? { predicate } : {}),
         // Titled as separate on purpose: the note renders inside the damage
         // card, and without the marker it reads as part of that roll.
         title: `${i18n("Independent")} · ${condAmount(e)} ${tl}${suffix}${e.src ? ` · ${e.src}` : ""}`,
@@ -1391,7 +1429,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         rule.sweSave = { type: e.saveType, dc: e.saveDc, mode: e.saveDcMode, out: e.saveOut };
         rule.predicate = ["swe-gated"];
         rule.hideIfDisabled = true;
-        mkSaveNote(e, tl, splash ? "splash" : "");
+        mkSaveNote(e, tl, splash ? "splash" : "", !splash && e.pick ? [pickOption(e.pickKey)] : null);
       }
       // A chosen extra only enters a roll whose options carry its key, which
       // the strike wrapper injects from the pre-attack dialog. A gated one
@@ -1532,7 +1570,17 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       "system.runes.striking": Number(d.runes.striking) || 0,
       "system.runes.property": [...d.runes.property],
       "system.traits.value": [...d.traits],
-      "system.rules": [...keep, ...sweRules, ...persRules, ...helperRules, ...condRules, ...atkRules],
+      // Weapon rules default to requiring the weapon equipped (held in enough
+      // hands), but a worn thrown dagger still has a valid Strike and the
+      // engines fire for it. Every rule here targets only this weapon's own
+      // Strike selectors, so dropping the requirement keeps both in step.
+      "system.rules": [
+        ...keep,
+        ...[...sweRules, ...persRules, ...helperRules, ...condRules, ...atkRules].map((r) => ({
+          ...r,
+          requiresEquipped: false
+        }))
+      ],
       [`flags.${MODULE_ID}.${COND_FLAG}`]: conds,
       [`flags.${MODULE_ID}.${HITCOND_FLAG}`]: d.hitConds.filter((h) => h.condition)
     };
@@ -1656,8 +1704,8 @@ async function runHealing(actor, timing, { itemId = null, rollOpts = [] } = {}) 
 /*                                                                             */
 /*  Gated damage resolves like a spell rider, but automatically: when a strike */
 /*  hits, the TARGET's save is rolled for them, and the piece is applied per   */
-/*  their degree of success - through applyDamage with IWR respected, so       */
-/*  resistances count. Runs only on the active GM's client, like healing.      */
+/*  their degree of success - as a typed damage roll, so immunities,          */
+/*  weaknesses and resistances apply. Runs only on the active GM's client.    */
 /* -------------------------------------------------------------------------- */
 
 function readGatedEntries(item) {
@@ -1687,6 +1735,44 @@ function readGatedEntries(item) {
     });
   }
   return out;
+}
+
+// The engines must hand applyDamage a typed DamageRoll: given a bare number,
+// PF2e skips immunities, weaknesses and resistances entirely (verified: 8 fire
+// against resistance 5 dealt 8 as a number, 3 as a typed roll). Precision is a
+// component of the weapon's base type; bleed is always persistent.
+async function applyTypedDamage(target, tokenDoc, amount, type, item, rollOpts = []) {
+  const DamageRoll = CONFIG.Dice.rolls.find((R) => R.name === "DamageRoll");
+  const base = item?.system?.damage?.damageType || "untyped";
+  const formula =
+    type === "precision"
+      ? `{(${amount}[precision])[${base}]}`
+      : type === "bleed"
+        ? `{(${amount})[persistent,bleed]}`
+        : `{(${amount})[${type}]}`;
+  const damage = DamageRoll ? await new DamageRoll(formula).evaluate() : amount;
+  const hpOf = (a) => {
+    const hp = a?.system?.attributes?.hp;
+    return (Number(hp?.value) || 0) + (Number(hp?.temp) || 0);
+  };
+  const before = hpOf(target);
+  await target.applyDamage({
+    damage,
+    token: tokenDoc ?? undefined,
+    item,
+    rollOptions: new Set(rollOpts.map(String))
+  });
+  // What actually came off, so the summary does not claim damage a
+  // resistance absorbed. Bleed becomes a persistent condition instead.
+  return type === "bleed" ? amount : Math.max(0, before - hpOf(target));
+}
+
+function dealtNote(amount, dealt) {
+  return dealt === amount ? "" : ` → ${dealt} ${i18n("AfterIWR")}`;
+}
+
+function targetName(actor, tokenDoc) {
+  return escHTML(tokenDoc?.name ?? actor?.name ?? "");
 }
 
 // degreeOfSuccess: 0 critical failure, 1 failure, 2 success, 3 critical success
@@ -1773,11 +1859,13 @@ async function runGatedSaves(attacker, item, message) {
         if (e.die) {
           amount = Number((await new Roll(`${e.value}${e.die}`).evaluate()).total) || 0;
         }
-        if (critHit) amount *= 2;
+        // PF2e never multiplies splash on a critical hit.
+        const doubled = critHit && e.kind !== "splash";
+        if (doubled) amount *= 2;
         const final = Math.floor(amount * mult);
         if (final > 0) {
-          await targetActor.applyDamage({ damage: final, token: tokenDoc ?? undefined, skipIWR: false });
-          lines.push(`${what} · ${saveInfo} → ${final} ${i18n("Applied")}${critHit ? ` (${i18n("CritMark")})` : ""}${mult === 0.5 ? ` (${i18n("SaveHalf")})` : ""}${mult === 2 ? " (x2)" : ""}`);
+          const dealt = await applyTypedDamage(targetActor, tokenDoc, final, e.type, item, ctxOpts);
+          lines.push(`${what} · ${saveInfo} → ${final} ${i18n("Applied")}${doubled ? ` (${i18n("CritMark")})` : ""}${mult === 0.5 ? ` (${i18n("SaveHalf")})` : ""}${mult === 2 ? " (x2)" : ""}${dealtNote(final, dealt)}`);
         } else {
           lines.push(`${what} · ${saveInfo} → ${i18n("Resisted")}`);
         }
@@ -1789,7 +1877,7 @@ async function runGatedSaves(attacker, item, message) {
   if (lines.length) {
     await ChatMessage.create({
       speaker: ChatMessage.getSpeaker({ actor: attacker }),
-      content: `<p><strong>${i18n("AutoSaves")} · ${targetActor.name}</strong></p><p>${lines.join("<br>")}</p>`
+      content: `<p><strong>${i18n("AutoSaves")} · ${targetName(targetActor, tokenDoc)}</strong></p><p>${lines.join("<br>")}</p>`
     });
   }
 }
@@ -1805,9 +1893,41 @@ function mapCountFromOptions(opts) {
   return opt === undefined ? null : Number(String(opt).split(":")[2]) || 0;
 }
 
-function mapStateFor(message) {
+// The attack a strike's damage belongs to. Damage rolled from the attack card
+// carries the card's message id (the damage wrapper tags it, since PF2e stores
+// no link); otherwise the newest attack by the same actor, with the same
+// weapon, at the same target - and the same MAP count when the damage knows it.
+function findOriginAttack(message) {
+  const opts = (message.flags?.pf2e?.context?.options ?? []).map(String);
+  const tag = opts.find((o) => o.startsWith("swe-atk:"));
+  if (tag) {
+    const tagged = game.messages.get(tag.slice("swe-atk:".length));
+    if (tagged?.flags?.pf2e?.context?.type === "attack-roll") return tagged;
+  }
+  const itemId = message.item?.id;
+  const actorId = message.actor?.id;
+  if (!itemId || !actorId) return null;
+  const targetToken = message.flags?.pf2e?.context?.target?.token ?? null;
+  const ownMap = mapCountFromOptions(opts);
+  const msgs = game.messages.contents;
+  let start = msgs.indexOf(message);
+  if (start === -1) start = msgs.length;
+  for (let i = start - 1, scanned = 0; i >= 0 && scanned < 40; i--, scanned++) {
+    const m = msgs[i];
+    const c = m.flags?.pf2e?.context;
+    if (c?.type !== "attack-roll") continue;
+    if (m.actor?.id !== actorId || m.item?.id !== itemId) continue;
+    if ((c.target?.token ?? null) !== targetToken) continue;
+    if (ownMap !== null && (mapCountFromOptions(c.options) ?? 0) !== ownMap) continue;
+    return m;
+  }
+  return null;
+}
+
+function mapStateFor(message, origin = null) {
   const own = mapCountFromOptions(message.flags?.pf2e?.context?.options);
   if (own !== null) return own;
+  if (origin) return mapCountFromOptions(origin.flags?.pf2e?.context?.options) ?? 0;
   const itemId = message.item?.id;
   const actorId = message.actor?.id;
   if (!itemId || !actorId) return 0;
@@ -1828,12 +1948,12 @@ function mapStateFor(message) {
 // Damage conditionals gated on MAP are not native rules (see condRules), so the
 // module applies them here: same timing as gated saves, same crit doubling,
 // same IWR-respecting apply.
-async function runMapConds(attacker, item, message) {
+async function runMapConds(attacker, item, message, origin = null) {
   const conds = readConds(item).filter(
     (c) => c.effect === "damage" && c.criteria.some((k) => k.filter === "map")
   );
   if (!conds.length) return;
-  const mapN = mapStateFor(message);
+  const mapN = mapStateFor(message, origin);
   if (!(mapN > 0)) return;
   const targetRef = message.flags?.pf2e?.context?.target;
   if (!targetRef?.actor) return;
@@ -1850,9 +1970,9 @@ async function runMapConds(attacker, item, message) {
   const critHit = message.flags?.pf2e?.context?.outcome === "criticalSuccess";
   const cfg = CONFIG.PF2E ?? {};
   const lines = [];
+  const ctxOpts = message.flags?.pf2e?.context?.options ?? [];
   for (const c of conds) {
     const others = c.criteria.filter((k) => k.filter !== "map");
-    const ctxOpts = message.flags?.pf2e?.context?.options ?? [];
     if (!others.every((k) => actorMatchesCrit(attacker, k, ctxOpts))) continue;
     let amount = Number(c.value) || 0;
     try {
@@ -1861,10 +1981,10 @@ async function runMapConds(attacker, item, message) {
       }
       if (critHit) amount *= 2;
       if (!(amount > 0)) continue;
-      await targetActor.applyDamage({ damage: amount, token: tokenDoc ?? undefined, skipIWR: false });
+      const dealt = await applyTypedDamage(targetActor, tokenDoc, amount, c.type, item, ctxOpts);
       const tl = damageTypeLabel(cfg, c.type);
       lines.push(
-        `${condAmount(c)} ${tl}${c.src ? ` · ${c.src}` : ""} → ${amount} ${i18n("Applied")}${critHit ? ` (${i18n("CritMark")})` : ""}`
+        `${condAmount(c)} ${tl}${c.src ? ` · ${escHTML(c.src)}` : ""} → ${amount} ${i18n("Applied")}${critHit ? ` (${i18n("CritMark")})` : ""}${dealtNote(amount, dealt)}`
       );
     } catch (err) {
       console.error(`${MODULE_ID} | map conditional apply failed`, err);
@@ -1873,7 +1993,7 @@ async function runMapConds(attacker, item, message) {
   if (lines.length) {
     await ChatMessage.create({
       speaker: ChatMessage.getSpeaker({ actor: attacker }),
-      content: `<p><strong>${i18n("MapDamage")} (MAP ${mapN}) · ${targetActor.name}</strong></p><p>${lines.join("<br>")}</p>`
+      content: `<p><strong>${i18n("MapDamage")} (MAP ${mapN}) · ${targetName(targetActor, tokenDoc)}</strong></p><p>${lines.join("<br>")}</p>`
     });
   }
 }
@@ -1888,10 +2008,12 @@ async function runHitConditions(attacker, item, message) {
   if (!entries.length) return;
   const targetRef = message.flags?.pf2e?.context?.target;
   let targetActor = null;
+  let targetToken = null;
   try {
     if (targetRef?.actor) {
       const doc = await fromUuid(targetRef.actor);
       targetActor = doc?.actor ?? doc;
+      targetToken = targetRef.token ? await fromUuid(targetRef.token) : null;
     }
   } catch {
     targetActor = null;
@@ -1901,6 +2023,7 @@ async function runHitConditions(attacker, item, message) {
   for (const h of entries) {
     const recipient = h.who === "wielder" ? attacker : targetActor;
     if (!recipient) continue;
+    const rname = h.who === "wielder" ? escHTML(attacker.name) : targetName(targetActor, targetToken);
     const clabel = labelFor(cfg.conditionTypes, h.condition);
     let apply = true;
     let saveInfo = "";
@@ -1911,7 +2034,7 @@ async function runHitConditions(attacker, item, message) {
           : h.saveDc;
       const stat = recipient.getStatistic?.(h.saveType);
       if (!stat) {
-        lines.push(`${clabel} → ${recipient.name}: ${i18n("NoStatistic")}`);
+        lines.push(`${clabel} → ${rname}: ${i18n("NoStatistic")}`);
         continue;
       }
       let dos;
@@ -1936,11 +2059,26 @@ async function runHitConditions(attacker, item, message) {
         const src = game.pf2e.ConditionManager.getCondition(h.condition)?.toObject();
         if (!src) continue;
         const valued = !!src.system?.value?.isValued;
-        if (valued) src.system.value.value = h.value;
-        await recipient.createEmbeddedDocuments("Item", [src]);
-        lines.push(`${valued ? `${clabel} ${h.value}` : clabel} → ${recipient.name}${saveInfo} → ${i18n("Applied")}`);
+        const label = valued ? `${clabel} ${h.value}` : clabel;
+        // A second copy of the same condition item lingers: the system
+        // deactivates one, and removing the condition (standing from prone)
+        // leaves the other behind. Raise an existing value instead.
+        const existing = [...(recipient.conditions?.bySlug?.(h.condition) ??
+          (recipient.itemTypes?.condition ?? []).filter((c) => c.slug === h.condition))];
+        const current = existing.length ? Math.max(...existing.map((c) => Number(c.value) || 1)) : 0;
+        const owned = existing.find((c) => recipient.items.has(c.id));
+        if (existing.length && (!valued || current >= h.value)) {
+          lines.push(`${label} → ${rname}${saveInfo} → ${i18n("AlreadyHas")}`);
+        } else if (valued && owned) {
+          await owned.update({ "system.value.value": h.value });
+          lines.push(`${label} → ${rname}${saveInfo} → ${i18n("Applied")}`);
+        } else {
+          if (valued) src.system.value.value = h.value;
+          await recipient.createEmbeddedDocuments("Item", [src]);
+          lines.push(`${label} → ${rname}${saveInfo} → ${i18n("Applied")}`);
+        }
       } else {
-        lines.push(`${clabel} → ${recipient.name}${saveInfo} → ${i18n("Resisted")}`);
+        lines.push(`${clabel} → ${rname}${saveInfo} → ${i18n("Resisted")}`);
       }
     } catch (err) {
       console.error(`${MODULE_ID} | hit-condition apply failed`, err);
@@ -2057,10 +2195,10 @@ function withOptions(params, extra) {
 
 function decorateStrike(strike) {
   const item = strike?.item;
-  if (!item || item.type !== "weapon" || strike._swePicks) return;
-  if (!pickableEntries(item).length) return;
-  strike._swePicks = true;
-  for (const variant of strike.variants ?? []) {
+  if (!item || item.type !== "weapon" || strike._sweWrapped) return;
+  strike._sweWrapped = true;
+  const hasPicks = pickableEntries(item).length > 0;
+  for (const variant of hasPicks ? (strike.variants ?? []) : []) {
     const orig = variant.roll;
     if (typeof orig !== "function") continue;
     variant.roll = async (params = {}) => {
@@ -2079,16 +2217,29 @@ function decorateStrike(strike) {
     };
   }
   // The system aliases these to the first variant once, at build time.
-  if (strike.variants?.[0]) strike.roll = strike.attack = strike.variants[0].roll;
+  if (hasPicks && strike.variants?.[0]) strike.roll = strike.attack = strike.variants[0].roll;
+  // Damage is wrapped for every weapon, picks or not: rolled from an attack
+  // card, it is tagged with that card's message id, which is the only exact
+  // way for the engines to know which attack (and whether it hit) the damage
+  // belongs to - PF2e stamps the damage outcome from the button pressed.
   for (const key of ["damage", "critical"]) {
     const orig = strike[key];
     if (typeof orig !== "function") continue;
     strike[key] = async (params = {}) => {
-      const ctx = [...(params.checkContext?.options ?? [])].map(String);
-      const picks = ctx.includes(PICK_MADE)
-        ? ctx.filter((o) => o.startsWith("swe-pick:"))
-        : lastPicksOf(item).map(pickOption);
-      return orig(withOptions(params, [PICK_MADE, ...picks]));
+      const extra = [];
+      if (hasPicks) {
+        const ctx = [...(params.checkContext?.options ?? [])].map(String);
+        const picks = ctx.includes(PICK_MADE)
+          ? ctx.filter((o) => o.startsWith("swe-pick:"))
+          : lastPicksOf(item).map(pickOption);
+        extra.push(PICK_MADE, ...picks);
+      }
+      if (params.checkContext) {
+        const el = params.event?.target ?? params.event?.currentTarget;
+        const originId = el?.closest?.("[data-message-id]")?.dataset?.messageId;
+        if (originId) extra.push(`swe-atk:${originId}`);
+      }
+      return extra.length ? orig(withOptions(params, extra)) : orig(params);
     };
   }
 }
@@ -2107,6 +2258,20 @@ function installStrikeWrapper() {
     return strike;
   };
   proto._sweStrikeWrapped = true;
+  // Area-fire and auto-fire usages are built by prepareAreaAttack instead.
+  if (typeof proto.prepareAreaAttack === "function" && !proto._sweAreaWrapped) {
+    const origArea = proto.prepareAreaAttack;
+    proto.prepareAreaAttack = function (...args) {
+      const attack = origArea.apply(this, args);
+      try {
+        decorateStrike(attack);
+      } catch (err) {
+        console.warn(`${MODULE_ID} | area attack wrapper`, err);
+      }
+      return attack;
+    };
+    proto._sweAreaWrapped = true;
+  }
 }
 
 function canEdit(item) {
@@ -2157,21 +2322,46 @@ Hooks.once("init", () => {
 Hooks.once("ready", () => {
   const mod = game.modules.get(MODULE_ID);
   if (mod) mod.api = { open: (item) => SimpleWeaponEditor.open(item) };
-  // Idempotent second chance in case CONFIG.PF2E was not ready at init.
-  if (!CONFIG.PF2E?.Actor?.documentClasses?.character?.prototype?._sweStrikeWrapped) {
-    installStrikeWrapper();
-    for (const actor of game.actors ?? []) if (actor.type === "character") actor.reset();
-  }
   console.log(`${MODULE_ID} | ready`);
 });
 
 Hooks.on("renderItemSheet", (app) => injectButton(app));
 Hooks.on("renderItemSheetPF2e", (app) => injectButton(app));
 
-Hooks.on("updateItem", (doc) => {
+Hooks.on("updateItem", (doc, changes) => {
   const app = SimpleWeaponEditor.instances.get(doc.uuid ?? doc.id);
-  if (app?.rendered) app.render();
+  if (!app?.rendered) return;
+  // A player's remembered damage choice changes nothing the editor shows, and
+  // re-rendering mid-typing threw away whatever had not been synced yet.
+  const keys = Object.keys(foundry.utils.flattenObject(changes ?? {})).filter(
+    (k) => k !== "_id" && !k.startsWith("_stats")
+  );
+  if (keys.length && keys.every((k) => k.startsWith(`flags.${MODULE_ID}.${PICK_FLAG}`))) return;
+  app.syncFromForm();
+  app.render();
 });
+
+// A hero-point reroll deletes the attack message and creates a copy that
+// keeps only flags.pf2e, dropping this module's marks: the same attack would
+// heal and fire its riders again. The marks are carried across the swap.
+const _rerollMemo = new Map();
+Hooks.on("deleteChatMessage", (message) => {
+  if (!isSoleExecutor()) return;
+  if (message?.flags?.pf2e?.context?.type !== "attack-roll") return;
+  const marks = message.flags?.[MODULE_ID];
+  if (!marks || !Object.keys(marks).length) return;
+  _rerollMemo.set(`${message.actor?.id}:${message.item?.id}`, {
+    marks: foundry.utils.deepClone(marks),
+    at: Date.now()
+  });
+});
+
+function takeRerollMarks(actorId, itemId) {
+  const key = `${actorId}:${itemId}`;
+  const memo = _rerollMemo.get(key);
+  _rerollMemo.delete(key);
+  return memo && Date.now() - memo.at < 60000 ? memo.marks : null;
+}
 
 Hooks.on("pf2e.startTurn", (combatant) => {
   const actor = combatant?.actor;
@@ -2185,11 +2375,19 @@ Hooks.on("createChatMessage", async (message) => {
   if (!isSoleExecutor()) return;
   const ctx = message?.flags?.pf2e?.context;
   if (ctx?.type === "attack-roll") {
-    if (ctx.outcome !== "success" && ctx.outcome !== "criticalSuccess") return;
-    if (message.getFlag?.(MODULE_ID, COND_DONE_FLAG)) return;
     const actor = message.actor;
     const itemId = message.item?.id;
     if (!actor || !itemId) return;
+    const carried = ctx.isReroll ? takeRerollMarks(actor.id, itemId) : null;
+    if (carried) {
+      try {
+        await message.update({ [`flags.${MODULE_ID}`]: carried });
+      } catch (err) {
+        console.warn(`${MODULE_ID} | could not carry marks to the reroll`, err);
+      }
+    }
+    if (ctx.outcome !== "success" && ctx.outcome !== "criticalSuccess") return;
+    if (message.getFlag?.(MODULE_ID, COND_DONE_FLAG)) return;
     try {
       await message.setFlag(MODULE_ID, COND_DONE_FLAG, true);
     } catch (err) {
@@ -2198,23 +2396,30 @@ Hooks.on("createChatMessage", async (message) => {
     await runHealing(actor, "healHit", { itemId, rollOpts: ctx.options ?? [] });
     return;
   }
-  // Saves resolve when damage is actually rolled, not on the hit: if the table
-  // never rolls the damage, no riders fire. The damage message carries the
-  // target, the outcome and the item (verified), and rolling damage after a
-  // miss keeps its failure outcome, which skips the saves.
+  // Riders resolve when a Strike's damage is actually rolled: if the table
+  // never rolls it, nothing fires. Only the Strike's own damage counts - an
+  // inline @Damage from a note on the card carries the same item but is
+  // sourceType "save" and has no <id>-damage domain. PF2e stamps strike damage
+  // success or criticalSuccess from the button pressed, even after a miss, so
+  // whether the blow landed is read off the attack it belongs to.
   if (ctx?.type === "damage-roll") {
-    if (ctx.outcome && ctx.outcome !== "success" && ctx.outcome !== "criticalSuccess") return;
-    if (message.getFlag?.(MODULE_ID, SAVES_DONE_FLAG)) return;
+    if (ctx.sourceType !== "attack") return;
     const actor = message.actor;
     const item = message.item;
     if (!actor || !item) return;
+    if (!(ctx.domains ?? []).includes(`${item.id}-damage`)) return;
+    const origin = findOriginAttack(message);
+    const outcome = origin?.flags?.pf2e?.context?.outcome ?? ctx.outcome;
+    if (outcome !== "success" && outcome !== "criticalSuccess") return;
+    const markOn = origin ?? message;
+    if (markOn.getFlag?.(MODULE_ID, RIDERS_DONE_FLAG)) return;
     try {
-      await message.setFlag(MODULE_ID, SAVES_DONE_FLAG, true);
+      await markOn.setFlag(MODULE_ID, RIDERS_DONE_FLAG, true);
     } catch (err) {
       console.warn(`${MODULE_ID} | could not mark message`, err);
     }
     await runGatedSaves(actor, item, message);
-    await runMapConds(actor, item, message);
+    await runMapConds(actor, item, message, origin);
     await runHitConditions(actor, item, message);
   }
 });

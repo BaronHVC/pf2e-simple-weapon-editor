@@ -224,7 +224,9 @@
           <option value="{{this.value}}" {{#if (sweEq this.value ../condition)}}selected{{/if}}>{{this.label}}</option>
           {{/each}}
         </select>
+        {{#if this.valued}}
         <input type="number" name="hconds.{{this.index}}.value" value="{{this.value}}" min="1" max="99" step="1" class="swe-narrow" title="{{localize 'SWE.HitCondValue'}}" />
+        {{/if}}
         <select name="hconds.{{this.index}}.saveType" class="swe-cat" title="{{localize 'SWE.SaveTitle'}}">
           <option value="" {{#unless this.saveType}}selected{{/unless}}>&mdash;</option>
           {{#each ../saveOptions}}
@@ -403,13 +405,16 @@
           {{#unless this.isMap}}
           <input type="text" name="conds.{{this.condIndex}}.criteria.{{this.index}}.slugInput" value="{{this.display}}" list="swe-dl-{{this.filter}}" class="swe-cond-target" placeholder="{{localize 'SWE.CondSearchPh'}}" autocomplete="off" spellcheck="false" />
           {{/unless}}
-          {{#if this.isState}}
+          {{#if this.showMin}}
           <input type="number" name="conds.{{this.condIndex}}.criteria.{{this.index}}.min" value="{{this.minVal}}" min="0" max="20" step="1" class="swe-narrow swe-min" placeholder="{{localize 'SWE.MinPh'}}" title="{{localize 'SWE.MinHint'}}" />
           {{/if}}
           <a data-action="sweRemoveCrit" data-cond="{{this.condIndex}}" data-index="{{this.index}}" title="{{localize 'SWE.Remove'}}"><i class="fa-solid fa-xmark"></i></a>
         </div>
         {{#if this.unknown}}
         <p class="swe-warning"><i class="fa-solid fa-triangle-exclamation"></i> {{localize "SWE.CondUnknown"}}: <code>{{this.slug}}</code></p>
+        {{/if}}
+        {{#if this.inert}}
+        <p class="swe-warning"><i class="fa-solid fa-triangle-exclamation"></i> {{localize "SWE.CondInert"}}</p>
         {{/if}}
         {{/each}}
         <a class="swe-ghostchip" data-action="sweAddCrit" data-cond="{{this.index}}"><i class="fa-solid fa-plus"></i> {{localize "SWE.AddCriterion"}}</a>
