@@ -179,6 +179,23 @@ function readDefense(item) {
   };
 }
 
+// A toggleable RollOption stores the player's choice (on/off, the picked
+// suboption) inside its own rule source; regenerating the rules would reset it
+// on every save, so the previous state is copied onto the rule with the same
+// slug.
+function withToggleState(rules, previous) {
+  const bySlug = new Map(previous.filter((r) => r?.key === "RollOption" && r.slug).map((r) => [r.slug, r]));
+  return rules.map((r) => {
+    if (r.key !== "RollOption" || !r.toggleable) return r;
+    const old = bySlug.get(r.slug);
+    if (!old) return r;
+    const out = { ...r };
+    if ("value" in old) out.value = old.value;
+    if ("selection" in old) out.selection = old.selection;
+    return out;
+  });
+}
+
 function isDefenseRule(r) {
   return typeof r?.slug === "string" && r.slug.startsWith(DEF_SLUG);
 }
@@ -313,12 +330,20 @@ function defenseRules(data, itemId) {
   // PF2e leaves armor property runes inert; the module adds the rules each
   // rune can honestly be expressed with. Runes past the slot limit are dropped
   // by the system itself, so they get no rules either.
+  // Slugs are keyed by the rune, not its position, so a rune keeps the state
+  // of its sheet toggles (Energy Adaptive's type, Winged) when others are
+  // added or removed; onSubmit carries that state across the regeneration.
   if (data.kind === "armor") {
-    data.runes.property.slice(0, data.runeSlots ?? data.runes.property.length).forEach((slug, i) => {
+    data.runes.property.slice(0, data.runeSlots ?? data.runes.property.length).forEach((slug) => {
       const spec = RUNE_AUTOMATION[slug];
       if (!spec?.rules?.length || data.runeOff.includes(slug)) return;
+      const runeLabel = labelFor(armorRuneRecord(), slug);
       spec.rules.forEach((r, j) => {
-        rules.push({ ...foundry.utils.deepClone(r), slug: `${DEF_SLUG}${tag}-r${i}-${j}` });
+        rules.push({
+          ...foundry.utils.deepClone(r),
+          label: runeLabel,
+          slug: `${DEF_SLUG}${tag}-r-${slug.toLowerCase()}-${j}`
+        });
       });
     });
   }
@@ -1043,7 +1068,7 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
       "system.traits.value": [...d.traits],
       "system.speedPenalty": d.speedPenalty,
       "system.acBonus": d.acBonus,
-      "system.rules": [...keep, ...defenseRules(d, this.item.id)],
+      "system.rules": [...keep, ...withToggleState(defenseRules(d, this.item.id), src.rules ?? [])],
       [`flags.${MODULE_ID}.${DEF_FLAG}`]: { defenses: d.defenses, mods: d.mods, conds: d.conds, runeOff: d.runeOff }
     };
     if (d.kind === "armor") {
