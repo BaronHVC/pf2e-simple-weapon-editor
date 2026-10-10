@@ -1700,7 +1700,24 @@ function healEntriesFor(actor, timing, onlyItemId = null, rollOpts = []) {
 
 // Prefer the system's own application so the result respects max HP, temporary
 // HP and the dying/wounded track. The clamped update is only a fallback.
-async function applyHealing(actor, total) {
+// Healings of one actor run one after another. The weapon and the armor
+// engines both answer the same turn-start hook, and two applications racing
+// each read the old HP, so the last write erased the other heal (caught live:
+// 4 of 4 turns lost one of two heals).
+const _healQueues = new Map();
+function applyHealing(actor, total) {
+  const key = actor?.uuid ?? actor?.id;
+  const prev = _healQueues.get(key) ?? Promise.resolve();
+  const run = prev.then(() => applyHealingNow(actor, total));
+  const tail = run.catch(() => {});
+  _healQueues.set(key, tail);
+  tail.then(() => {
+    if (_healQueues.get(key) === tail) _healQueues.delete(key);
+  });
+  return run;
+}
+
+async function applyHealingNow(actor, total) {
   if (!(total > 0)) return;
   // PF2e's applyDamage builds its own chat card from the token and crashes
   // without one (verified against 8.4.1: it reads the token's name), so it is
@@ -2489,5 +2506,13 @@ export {
   BONUS_TYPES,
   guardClicks,
   releaseClickGuard,
-  renderSoon
+  renderSoon,
+  condChoices,
+  critPredicateTerm,
+  condLabel,
+  resolveCritInput,
+  isValuedCondition,
+  actorMatchesCrit,
+  applyHealing,
+  isSoleExecutor
 };

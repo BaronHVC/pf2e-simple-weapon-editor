@@ -25,6 +25,7 @@
   },
   "esmodules": [
     "scripts/main.js",
+    "scripts/armor-runes.js",
     "scripts/armor.js"
   ],
   "styles": [

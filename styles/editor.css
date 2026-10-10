@@ -785,3 +785,28 @@
   margin: -2px 0 6px 4px;
   font-size: 0.82em;
 }
+
+/* Condiciones por portador y runas automatizadas (armaduras) */
+.swe-editor .swe-kind-def .swe-card-head { background: rgba(95, 190, 126, 0.10); }
+.swe-editor .swe-kind-def .swe-fx-icon {
+  color: #5fbe7e;
+  background: rgba(95, 190, 126, 0.16);
+  border: 1px solid rgba(95, 190, 126, 0.5);
+}
+.swe-editor .swe-rune-auto {
+  font-size: 0.75em;
+  padding: 1px 6px;
+  border-radius: 8px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.swe-editor .swe-rune-auto-full { color: #5fbe7e; }
+.swe-editor .swe-rune-auto-partial { color: #d8b95e; }
+.swe-editor .swe-rune-auto-manual { color: #9aa0aa; }
+.swe-editor .swe-rune-auto-engine { color: #7fb0d4; }
+.swe-editor .swe-rune-summary {
+  font-size: 0.82em;
+  opacity: 0.75;
+  padding: 0 8px 6px;
+}

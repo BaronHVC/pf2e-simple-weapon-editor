@@ -9,8 +9,17 @@ import {
   BONUS_TYPES,
   guardClicks,
   releaseClickGuard,
-  renderSoon
+  renderSoon,
+  condChoices,
+  critPredicateTerm,
+  condLabel,
+  resolveCritInput,
+  isValuedCondition,
+  actorMatchesCrit,
+  applyHealing,
+  isSoleExecutor
 } from "./main.js";
+import { RUNE_AUTOMATION } from "./armor-runes.js";
 
 /* -------------------------------------------------------------------------- */
 /*  Armor and shield editor                                                   */
@@ -67,8 +76,68 @@ const SPECIALIZATION = {
 const ARMOR_FREQ_TRAITS = ["bulwark", "comfort", "flexible", "hindering", "laminar", "noisy", "ponderous"];
 const SHIELD_FREQ_TRAITS = ["hefty-2", "deflecting-physical-ranged", "foldaway", "harnessed", "shield-throw-20"];
 
+// Wearer conditionals: the weapon editor's criteria, plus one only armor has a
+// use for - the ATTACKER suffering a condition. An attack against the wearer
+// checks AC with the attacker's options as origin:condition:<slug> (verified:
+// +2 AC vs a frightened attacker raised the DC from 16 to 18).
+const ACOND_FILTERS = ["ancestry", "heritage", "class", "feat", "selfCondition", "originCondition"];
+const ACOND_STATE = ["selfCondition", "originCondition"];
+const ACOND_EFFECTS = ["mod", "resist", "healTurn"];
+
 function isTruthy(v) {
   return v === true || v === "true" || v === "on";
+}
+
+function normalizeACrit(crit) {
+  const filter = ACOND_FILTERS.includes(crit?.filter) ? crit.filter : "ancestry";
+  const out = { filter, slug: String(crit?.slug ?? "").trim() };
+  if (ACOND_STATE.includes(filter)) out.min = clampInt(crit?.min, 0, 20, 0);
+  return out;
+}
+
+function normalizeACond(c) {
+  const effect = ACOND_EFFECTS.includes(c?.effect) ? c.effect : "mod";
+  // Every payload is kept whatever the effect, so switching the effect back
+  // and forth does not lose what was typed.
+  return {
+    effect,
+    criteria: (Array.isArray(c?.criteria) ? c.criteria : []).map(normalizeACrit),
+    mod: normalizeMod(c?.mod ?? { target: "ac", type: "circumstance", value: 1 }),
+    def: normalizeDefense(c?.def ?? { kind: "resistance", type: "fire", value: 5 }),
+    heal: { value: clampInt(c?.heal?.value, 1, 99, 1), die: ["d4", "d6", "d8", "d10", "d12"].includes(c?.heal?.die) ? c.heal.die : "" },
+    src: String(c?.src ?? "").trim()
+  };
+}
+
+// The attacker's options only exist while an attack or effect is checked
+// against the wearer: a resistance is settled when the actor is prepared, and
+// turn-start healing has no attacker at all.
+function acritInert(effect, crit) {
+  return crit.filter === "originCondition" && effect !== "mod";
+}
+
+function acritTerm(crit) {
+  if (crit.filter === "originCondition") {
+    const base = `origin:condition:${crit.slug}`;
+    return Number(crit.min) > 1 ? { gte: [base, Number(crit.min)] } : { or: [base] };
+  }
+  return critPredicateTerm(crit);
+}
+
+function armorMatchesCrit(actor, crit) {
+  if (crit.filter === "originCondition") return false;
+  return actorMatchesCrit(actor, crit);
+}
+
+function acondChoices(choices) {
+  return { ...choices, originCondition: choices?.selfCondition ?? [] };
+}
+
+function acritText(choices, crit) {
+  const label = condLabel(acondChoices(choices), crit) ?? crit.slug;
+  if (!ACOND_STATE.includes(crit.filter)) return label;
+  const who = i18n(crit.filter === "originCondition" ? "ArmWhoAttacker" : "WhoSelf");
+  return `${who}: ${label}${Number(crit.min) > 1 ? ` \u2265${crit.min}` : ""}`;
 }
 
 function normalizeDefense(e) {
@@ -101,7 +170,12 @@ function readDefense(item) {
   const raw = item?._source?.flags?.[MODULE_ID]?.[DEF_FLAG] ?? {};
   return {
     defenses: (Array.isArray(raw.defenses) ? raw.defenses : []).map(normalizeDefense).filter((d) => d.type),
-    mods: (Array.isArray(raw.mods) ? raw.mods : []).map(normalizeMod)
+    mods: (Array.isArray(raw.mods) ? raw.mods : []).map(normalizeMod),
+    conds: (Array.isArray(raw.conds) ? raw.conds : [])
+      .map(normalizeACond)
+      .map((c) => ({ ...c, criteria: c.criteria.filter((k) => k.slug) }))
+      .filter((c) => c.criteria.length),
+    runeOff: Array.isArray(raw.runeOff) ? raw.runeOff.map(String) : []
   };
 }
 
@@ -192,6 +266,62 @@ function defenseRules(data, itemId) {
     if (predicate.length) rule.predicate = predicate;
     rules.push(rule);
   });
+  // Wearer conditionals become native rules gated on their criteria; healing
+  // has no rule element that rolls dice, so the turn-start engine applies it.
+  data.conds.forEach((c, i) => {
+    const terms = c.criteria.filter((k) => !acritInert(c.effect, k)).map(acritTerm);
+    if (!terms.length || c.effect === "healTurn") return;
+    if (c.effect === "mod") {
+      const m = c.mod;
+      const predicate = [...terms, ...(AGAINST_TARGETS.includes(m.target) ? AGAINST_PREDICATE[m.against] ?? [] : [])];
+      rules.push({
+        key: "FlatModifier",
+        slug: `${DEF_SLUG}${tag}-c${i}`,
+        selector: modSelector(m.target),
+        type: m.type,
+        value: m.value,
+        label: c.src || modText(m),
+        predicate
+      });
+    } else {
+      const d = c.def;
+      const rule = {
+        key: DEF_RULE_KEY[d.kind],
+        slug: `${DEF_SLUG}${tag}-c${i}`,
+        type: d.type,
+        label: c.src || defenseText(d),
+        predicate: terms
+      };
+      if (d.kind !== "immunity") rule.value = d.scale === "fixed" ? d.value : DEF_SCALE_FORMULA[d.scale];
+      if (d.except) rule.exceptions = [d.except];
+      rules.push(rule);
+    }
+  });
+  // An adopted ancestry never becomes a roll option on its own (same helper as
+  // the weapon editor emits), so ancestry criteria need it published.
+  if (data.conds.some((c) => c.effect !== "healTurn" && c.criteria.some((k) => k.filter === "ancestry"))) {
+    rules.push({
+      key: "ActiveEffectLike",
+      slug: `${DEF_SLUG}${tag}-adopted`,
+      mode: "override",
+      path: "flags.pf2e.rollOptions.all.swe-adopted:{actor|system.details.ancestry.adopted}",
+      value: true,
+      priority: 999,
+      predicate: ["feat:adopted-ancestry"]
+    });
+  }
+  // PF2e leaves armor property runes inert; the module adds the rules each
+  // rune can honestly be expressed with. Runes past the slot limit are dropped
+  // by the system itself, so they get no rules either.
+  if (data.kind === "armor") {
+    data.runes.property.slice(0, data.runeSlots ?? data.runes.property.length).forEach((slug, i) => {
+      const spec = RUNE_AUTOMATION[slug];
+      if (!spec?.rules?.length || data.runeOff.includes(slug)) return;
+      spec.rules.forEach((r, j) => {
+        rules.push({ ...foundry.utils.deepClone(r), slug: `${DEF_SLUG}${tag}-r${i}-${j}` });
+      });
+    });
+  }
   return rules;
 }
 
@@ -357,6 +487,8 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
       traits: [...new Set(s.traits?.value ?? [])],
       defenses: def.defenses,
       mods: def.mods,
+      conds: def.conds,
+      runeOff: def.runeOff,
       freeMode: false
     };
     if (item.type === "armor") {
@@ -408,7 +540,11 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
       sweShowRune: SimpleArmorEditor.actShowRune,
       sweAddTrait: SimpleArmorEditor.actAddTrait,
       sweQuickTrait: SimpleArmorEditor.actQuickTrait,
-      sweRemoveTrait: SimpleArmorEditor.actRemoveTrait
+      sweRemoveTrait: SimpleArmorEditor.actRemoveTrait,
+      sweAddACond: SimpleArmorEditor.actAddACond,
+      sweRemoveACond: SimpleArmorEditor.actRemoveACond,
+      sweAddACrit: SimpleArmorEditor.actAddACrit,
+      sweRemoveACrit: SimpleArmorEditor.actRemoveACrit
     }
   };
 
@@ -460,15 +596,25 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
       }
       const infos = await Promise.all(d.runes.property.map((slug) => armorRuneInfo(slug)));
       slots = armorPropertySlots(this.item, potency);
-      runesResolved = d.runes.property.map((slug, i) => ({
-        slug,
-        label: labelFor(armorRuneRecord(), slug),
-        level: infos[i]?.level ?? null,
-        price: infos[i]?.price ?? null,
-        descHTML: infos[i]?.descHTML ?? null,
-        over: i >= slots,
-        selected: slug === this.selectedRune
-      }));
+      const es = game.i18n.lang === "es";
+      runesResolved = d.runes.property.map((slug, i) => {
+        const spec = RUNE_AUTOMATION[slug];
+        const cls = spec?.cls ?? "manual";
+        return {
+          slug,
+          label: labelFor(armorRuneRecord(), slug),
+          level: infos[i]?.level ?? null,
+          price: infos[i]?.price ?? null,
+          descHTML: infos[i]?.descHTML ?? null,
+          over: i >= slots,
+          selected: slug === this.selectedRune,
+          autoCls: cls,
+          autoLabel: i18n(`ArmRuneAuto_${cls}`),
+          autoSummary: spec ? (es ? spec.es : spec.en) : "",
+          automatable: !!spec?.rules?.length,
+          autoOn: !d.runeOff.includes(slug)
+        };
+      });
     } else {
       preview.push(`${i18n("ArmPreviewAC")} +${d.acBonus} (${i18n("ShRaisedNote")})`);
       preview.push(`${i18n("ShHardness")} ${d.hardness}`);
@@ -485,6 +631,37 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
       if (src.material?.type && src.material?.grade) notes.push(i18n("ShMaterialHint"));
     }
     for (const def of d.defenses) preview.push(defenseText(def));
+    const choices = await condChoices();
+    this._condChoices = acondChoices(choices);
+    const cfgDies = ["d4", "d6", "d8", "d10", "d12"];
+    const acondsIndexed = d.conds.map((c, i) => ({
+      ...c,
+      index: i,
+      isMod: c.effect === "mod",
+      isResist: c.effect === "resist",
+      isHeal: c.effect === "healTurn",
+      kind: c.effect === "mod" ? "attack" : c.effect === "resist" ? "def" : "heal",
+      icon: c.effect === "mod" ? "fa-shield-halved" : c.effect === "resist" ? "fa-shield" : "fa-heart",
+      modAgainstApplies: AGAINST_TARGETS.includes(c.mod.target),
+      defIsImmunity: c.def.kind === "immunity",
+      defTypeOptions: iwrOptions(c.def.kind),
+      defExceptOptions: [{ value: "", label: "\u2014" }, ...iwrOptions(c.def.kind)],
+      criteria: c.criteria.map((crit, j) => {
+        const resolved = condLabel(this._condChoices, crit);
+        return {
+          ...crit,
+          index: j,
+          condIndex: i,
+          first: j === 0,
+          showMin: ACOND_STATE.includes(crit.filter) && (!crit.slug || isValuedCondition(crit.slug)),
+          minVal: Number(crit.min) > 0 ? crit.min : "",
+          inert: acritInert(c.effect, crit),
+          display: resolved ?? crit.slug,
+          dl: `swe-dl-${this.id}-${crit.filter}`,
+          unknown: !!crit.slug && !resolved
+        };
+      })
+    }));
     const derivedGp = Number(this.item.system?.price?.value?.gp ?? 0);
     const baseGp = Number(this.item._source.system?.price?.value?.gp ?? 0);
     const priceLocked = basePriceIgnored(this.item);
@@ -541,6 +718,13 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
       againstOptions: AGAINST.map((a) => ({ value: a, label: i18n(`ArmAgainst_${a}`) })),
       runesResolved,
       slots,
+      acondsIndexed,
+      acondEffectOptions: ACOND_EFFECTS.map((e) => ({ value: e, label: i18n(`ArmEffect_${e}`) })),
+      acondFilterOptions: ACOND_FILTERS.map((f) => ({
+        value: f,
+        label: i18n(f === "originCondition" ? "ArmFilter_originCondition" : `Filter_${f}`)
+      })),
+      dies: cfgDies,
       propCount: isArmor ? d.runes.property.length : 0,
       overLimit: isArmor && d.runes.property.length > slots,
       abp: isArmor && abpFor(this.item.actor),
@@ -550,7 +734,12 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
       // datalist id, so the shield's trait search offered armor traits.
       datalists: [
         { id: `swe-dl-${this.id}-arune`, options: runeOpts },
-        { id: `swe-dl-${this.id}-atrait`, options: traitOpts }
+        { id: `swe-dl-${this.id}-atrait`, options: traitOpts },
+        ...["ancestry", "heritage", "class", "selfCondition", "originCondition"].map((k) => ({
+          id: `swe-dl-${this.id}-${k}`,
+          options: this._condChoices[k] ?? []
+        })),
+        { id: `swe-dl-${this.id}-feat`, options: [] }
       ]
     };
   }
@@ -561,10 +750,51 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
     const form = this.element;
     const body = form.querySelector(".swe-body");
     if (body && this._sweScrollTop) body.scrollTop = this._sweScrollTop;
+    const isCritFilter = (el) => /^aconds\.\d+\.criteria\.\d+\.filter$/.test(el.name ?? "");
+    const isCritTarget = (el) => /^aconds\.\d+\.criteria\.\d+\.slugInput$/.test(el.name ?? "");
     for (const el of form.querySelectorAll("select, input[type=checkbox], input[type=number]")) {
       if (el.name === "runeToAdd" || el.name === "traitToAdd") continue;
+      if (isCritFilter(el)) continue;
       el.addEventListener("change", () => {
         this.syncFromForm();
+        renderSoon(this);
+      });
+    }
+    for (const el of form.querySelectorAll("input[type=text]")) {
+      if (!isCritTarget(el)) continue;
+      el.addEventListener("change", () => {
+        this.syncFromForm();
+        renderSoon(this);
+      });
+    }
+    // The feat list is in the thousands: its datalist is filled with the top
+    // matches of whatever the focused search holds, as in the weapon editor.
+    const featList = form.querySelector(`#swe-dl-${this.id}-feat`);
+    if (featList) {
+      const fill = (q) => {
+        const all = this._condChoices?.feat ?? [];
+        const t = q.trim().toLowerCase();
+        const hits = t.length < 2 ? [] : all.filter((o) => o.label.toLowerCase().includes(t)).slice(0, 50);
+        featList.replaceChildren(...hits.map((o) => Object.assign(document.createElement("option"), { value: o.label })));
+      };
+      for (const el of form.querySelectorAll(`input[list="swe-dl-${this.id}-feat"]`)) {
+        el.addEventListener("input", () => fill(el.value));
+      }
+    }
+    for (const el of form.querySelectorAll("select")) {
+      if (!isCritFilter(el)) continue;
+      el.addEventListener("change", () => {
+        const [, ci, , j] = el.name.split(".");
+        const prev = this.data.conds[Number(ci)]?.criteria?.[Number(j)]?.filter;
+        this.syncFromForm();
+        const crit = this.data.conds[Number(ci)]?.criteria?.[Number(j)];
+        if (crit) {
+          // Wearer and attacker condition criteria share one list.
+          const keep = ACOND_STATE.includes(prev) && ACOND_STATE.includes(el.value);
+          crit.filter = el.value;
+          if (!keep) crit.slug = "";
+          Object.assign(crit, normalizeACrit(crit));
+        }
         renderSoon(this);
       });
     }
@@ -619,7 +849,75 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
         .sort(byIndex)
         .map((k) => normalizeMod({ ...(d.mods[Number(k)] ?? {}), ...o.mods[k] }));
     }
+    if (o.aconds) {
+      d.conds = Object.keys(o.aconds)
+        .sort(byIndex)
+        .map((k) => {
+          const prev = d.conds[Number(k)] ?? {};
+          const raw = o.aconds[k] ?? {};
+          const crits = raw.criteria
+            ? Object.keys(raw.criteria)
+                .sort(byIndex)
+                .map((ck) => {
+                  const e = raw.criteria[ck] ?? {};
+                  const slug =
+                    e.slugInput !== undefined ? resolveCritInput(this._condChoices, e.filter, e.slugInput) : e.slug;
+                  return { ...(prev.criteria?.[Number(ck)] ?? {}), filter: e.filter, slug, min: e.min };
+                })
+            : prev.criteria ?? [];
+          const c = normalizeACond({
+            ...prev,
+            ...raw,
+            criteria: crits,
+            mod: { ...(prev.mod ?? {}), ...(raw.mod ?? {}) },
+            def: { ...(prev.def ?? {}), ...(raw.def ?? {}) },
+            heal: { ...(prev.heal ?? {}), ...(raw.heal ?? {}) }
+          });
+          const valid = iwrOptions(c.def.kind).map((x) => x.value);
+          if (!valid.includes(c.def.type)) c.def.type = valid.includes("fire") ? "fire" : (valid[0] ?? "");
+          if (c.def.except && !valid.includes(c.def.except)) c.def.except = "";
+          return c;
+        });
+    }
+    if (o.runeOn && d.kind === "armor") {
+      d.runeOff = Object.entries(o.runeOn)
+        .filter(([, v]) => v === false)
+        .map(([k]) => k);
+    }
     d.freeMode = !!o.freeMode;
+  }
+
+  static actAddACond() {
+    this.syncFromForm();
+    this.data.conds.push(normalizeACond({ effect: "mod", criteria: [{ filter: "ancestry", slug: "" }] }));
+    this.render();
+  }
+
+  static actRemoveACond(event, target) {
+    this.syncFromForm();
+    const idx = Number(target?.dataset?.index);
+    this.data.conds = this.data.conds.filter((x, i) => i !== idx);
+    this.render();
+  }
+
+  static actAddACrit(event, target) {
+    this.syncFromForm();
+    const ci = Number(target?.dataset?.cond);
+    this.data.conds[ci]?.criteria.push(normalizeACrit({ filter: "ancestry", slug: "" }));
+    this.render();
+  }
+
+  static actRemoveACrit(event, target) {
+    this.syncFromForm();
+    const ci = Number(target?.dataset?.cond);
+    const idx = Number(target?.dataset?.index);
+    const cond = this.data.conds[ci];
+    if (!cond) return;
+    // A conditional with no criteria would apply to everyone; removing the
+    // last one deletes the card instead, as in the weapon editor.
+    if (cond.criteria.length <= 1) this.data.conds = this.data.conds.filter((x, i) => i !== ci);
+    else cond.criteria = cond.criteria.filter((x, j) => j !== idx);
+    this.render();
   }
 
   static actTab(event, target) {
@@ -731,6 +1029,12 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
       }
     }
     const keep = (src.rules ?? []).filter((r) => !isDefenseRule(r));
+    if (d.kind === "armor") d.runeSlots = armorPropertySlots(this.item, d.runes.potency);
+    const conds = d.conds
+      .map((c) => ({ ...c, criteria: c.criteria.filter((k) => k.slug) }))
+      .filter((c) => c.criteria.length);
+    if (conds.length < d.conds.length) ui.notifications.warn(`${i18n("CondNoTarget")} (${d.conds.length - conds.length})`);
+    d.conds = conds;
     const update = {
       // The displayed name can be generated ("+1 Breastplate") or mystified;
       // an emptied field falls back to the stored one, not the displayed one.
@@ -740,7 +1044,7 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
       "system.speedPenalty": d.speedPenalty,
       "system.acBonus": d.acBonus,
       "system.rules": [...keep, ...defenseRules(d, this.item.id)],
-      [`flags.${MODULE_ID}.${DEF_FLAG}`]: { defenses: d.defenses, mods: d.mods }
+      [`flags.${MODULE_ID}.${DEF_FLAG}`]: { defenses: d.defenses, mods: d.mods, conds: d.conds, runeOff: d.runeOff }
     };
     if (d.kind === "armor") {
       Object.assign(update, {
@@ -840,7 +1144,7 @@ const EXTERNAL_FIELDS = [
   ["system.hardness", ["hardness"]],
   ["system.hp.max", ["hpMax"]],
   ["system.runes", ["runes", "reinforcing"]],
-  [`flags.${MODULE_ID}.${DEF_FLAG}`, ["defenses", "mods"]]
+  [`flags.${MODULE_ID}.${DEF_FLAG}`, ["defenses", "mods", "conds", "runeOff"]]
 ];
 
 Hooks.on("updateItem", (doc, changes) => {
@@ -861,4 +1165,41 @@ Hooks.on("updateItem", (doc, changes) => {
 Hooks.once("ready", () => {
   const mod = game.modules.get(MODULE_ID);
   if (mod?.api) mod.api.openDefense = (item) => SimpleArmorEditor.open(item);
+});
+
+// Turn-start healing from armor and shield conditionals, mirroring the weapon
+// engine: active GM only, one combined real roll, nothing when already at
+// full health. Gear must be equipped and, when investable, invested - the same
+// requirement the system puts on the item's rule elements.
+async function runArmorHealing(actor) {
+  if (!isSoleExecutor()) return;
+  const hp = actor?.system?.attributes?.hp;
+  if (!hp || Number(hp.value) >= Number(hp.max)) return;
+  const entries = [];
+  for (const item of actor.items ?? []) {
+    if (item.type !== "armor" && item.type !== "shield") continue;
+    if (!item.isEquipped || item.isInvested === false) continue;
+    for (const c of readDefense(item).conds) {
+      if (c.effect !== "healTurn") continue;
+      if (c.criteria.every((k) => armorMatchesCrit(actor, k))) entries.push({ item, c });
+    }
+  }
+  if (!entries.length) return;
+  try {
+    const formula = entries.map(({ c }) => (c.heal.die ? `${c.heal.value}${c.heal.die}` : `${c.heal.value}`)).join(" + ");
+    const roll = await new Roll(formula).evaluate();
+    const names = [...new Set(entries.map(({ item, c }) => c.src || item.name))];
+    await roll.toMessage({
+      speaker: ChatMessage.getSpeaker({ actor }),
+      flavor: `${i18n("ArmHealTurn")} \u00b7 ${names.join(" \u00b7 ")}`
+    });
+    await applyHealing(actor, Number(roll.total));
+  } catch (err) {
+    console.error(`${MODULE_ID} | armor healing failed`, err);
+  }
+}
+
+Hooks.on("pf2e.startTurn", (combatant) => {
+  const actor = combatant?.actor;
+  if (actor) runArmorHealing(actor);
 });

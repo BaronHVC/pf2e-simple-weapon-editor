@@ -199,7 +199,7 @@
   "SWE.ArmResilient4": "Mythic resilient (+4)",
   "SWE.ArmPotencyHint": "Potency only adds to AC, and resilient to saves, while the armor is worn and invested.",
   "SWE.ArmABPWarn": "Automatic Bonus Progression is on: PF2e ignores potency and resilient runes and gives those bonuses by level.",
-  "SWE.ArmRunesInertHint": "In PF2e 8.4 armor property runes only change name, level and price: their effects are not automated.",
+  "SWE.ArmRunesInertHint": "PF2e does not automate armor property runes; this module adds the rules each rune can honestly be expressed with (see each card).",
   "SWE.ShReinforcing": "Reinforcing rune",
   "SWE.ShReinf1": "Minor reinforcing",
   "SWE.ShReinf2": "Lesser reinforcing",
@@ -212,5 +212,18 @@
   "SWE.ShCircHint": "A circumstance bonus to AC does not stack with the circumstance bonus of Raise a Shield: only the higher one applies.",
   "SWE.ShEffective": "Effective values (reinforcing rune or material)",
   "SWE.ShMaterialHint": "This shield's precious material sets its Hardness and HP; editing the base values may have no effect.",
-  "SWE.ArmPriceLockedHint": "PF2e prices this item from its runes and material and ignores the base price, so it cannot be edited here."
+  "SWE.ArmPriceLockedHint": "PF2e prices this item from its runes and material and ignores the base price, so it cannot be edited here.",
+  "SWE.ArmCondHint": "Effects that only apply depending on who wears it, or on the attacker.",
+  "SWE.ArmEffect_mod": "defensive modifier",
+  "SWE.ArmEffect_resist": "resistance / weakness / immunity",
+  "SWE.ArmEffect_healTurn": "healing at the start of the turn",
+  "SWE.ArmFilter_originCondition": "the attacker is suffering the condition",
+  "SWE.ArmWhoAttacker": "attacker",
+  "SWE.ArmCondInert": "The attacker only exists while an attack or effect is checked against the wearer: this requirement works with defensive modifiers, not with resistances or turn-start healing.",
+  "SWE.ArmRuneAuto_full": "automated",
+  "SWE.ArmRuneAuto_partial": "partly automated",
+  "SWE.ArmRuneAuto_manual": "manual",
+  "SWE.ArmRuneAuto_engine": "reaction (later phase)",
+  "SWE.ArmRuneAutoToggle": "Apply this rune's rules automatically",
+  "SWE.ArmHealTurn": "Healing from worn gear"
 }

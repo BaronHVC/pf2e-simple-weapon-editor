@@ -199,7 +199,7 @@
   "SWE.ArmResilient4": "Resiliente mítica (+4)",
   "SWE.ArmPotencyHint": "La potencia solo suma a la CA, y la resiliente a las salvaciones, con la armadura puesta e investida.",
   "SWE.ArmABPWarn": "La Progresión Automática de Bonos está activa: PF2e ignora las runas de potencia y resiliente y da esos bonificadores por nivel.",
-  "SWE.ArmRunesInertHint": "En PF2e 8.4 las runas de propiedad de armadura solo cambian nombre, nivel y precio: sus efectos no están automatizados.",
+  "SWE.ArmRunesInertHint": "PF2e no automatiza las runas de propiedad de armadura; este módulo añade las reglas con que cada runa se puede expresar fielmente (ver cada ficha).",
   "SWE.ShReinforcing": "Runa de refuerzo",
   "SWE.ShReinf1": "Refuerzo menor",
   "SWE.ShReinf2": "Refuerzo inferior",
@@ -212,5 +212,18 @@
   "SWE.ShCircHint": "Un bonificador circunstancial a la CA no se suma al circunstancial de Alzar un escudo: solo cuenta el mayor.",
   "SWE.ShEffective": "Valores efectivos (runa de refuerzo o material)",
   "SWE.ShMaterialHint": "El material precioso del escudo fija su Dureza y PV; editar los valores base puede no tener efecto.",
-  "SWE.ArmPriceLockedHint": "PF2e calcula el precio de este objeto con sus runas y material e ignora el precio base, así que no se puede editar aquí."
+  "SWE.ArmPriceLockedHint": "PF2e calcula el precio de este objeto con sus runas y material e ignora el precio base, así que no se puede editar aquí.",
+  "SWE.ArmCondHint": "Efectos que solo se aplican según quién la lleva, o según el atacante.",
+  "SWE.ArmEffect_mod": "modificador defensivo",
+  "SWE.ArmEffect_resist": "resistencia / debilidad / inmunidad",
+  "SWE.ArmEffect_healTurn": "curación al inicio del turno",
+  "SWE.ArmFilter_originCondition": "el atacante sufre el estado",
+  "SWE.ArmWhoAttacker": "atacante",
+  "SWE.ArmCondInert": "El atacante solo existe mientras un ataque o efecto se resuelve contra el portador: este requisito sirve para modificadores defensivos, no para resistencias ni curación de turno.",
+  "SWE.ArmRuneAuto_full": "automatizada",
+  "SWE.ArmRuneAuto_partial": "automatizada en parte",
+  "SWE.ArmRuneAuto_manual": "manual",
+  "SWE.ArmRuneAuto_engine": "reacción (fase siguiente)",
+  "SWE.ArmRuneAutoToggle": "Aplicar automáticamente las reglas de esta runa",
+  "SWE.ArmHealTurn": "Curación por equipo puesto"
 }
