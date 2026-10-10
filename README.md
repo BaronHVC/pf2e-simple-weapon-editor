@@ -1,8 +1,8 @@
 # PF2e Simple Weapon Editor
 
-Un editor de armas para **Foundry VTT** con el sistema **Pathfinder 2e**: todo lo que un GM quiere tocar de un arma —daño, runas, rasgos y efectos según quién la porte— en una sola ventana, sin editar JSON ni pelearse con rule elements. Y lo que se configura, **se resuelve solo en mesa**: salvaciones, curaciones y condiciones se tiran y aplican automáticamente.
+Un editor de armas, **armaduras y escudos** para **Foundry VTT** con el sistema **Pathfinder 2e**: todo lo que un GM quiere tocar de su equipo —daño, defensas, runas, rasgos y efectos según quién lo porte— en una sola ventana, sin editar JSON ni pelearse con rule elements. Y lo que se configura, **se resuelve solo en mesa**: salvaciones, curaciones y condiciones se tiran y aplican automáticamente.
 
-*A weapon editor for Foundry VTT (PF2e): damage, runes, traits and wielder-dependent effects in one window, with automatic at-the-table resolution of saves and healing. UI available in English and Spanish.*
+*A weapon, armor and shield editor for Foundry VTT (PF2e): damage, defenses, runes, traits and wielder-dependent effects in one window, with automatic at-the-table resolution of saves and healing. UI available in English and Spanish.*
 
 ## Instalación
 
@@ -47,6 +47,18 @@ Efectos que solo se activan bajo ciertas circunstancias. Los requisitos se combi
 - **MAP**: que el portador esté atacando con penalización por ataques múltiples.
 
 Y el efecto puede ser **daño extra**, **curación al golpear**, **curación al inicio del turno**, o un **modificador a la tirada de ataque** con el tipo que elija el GM (circunstancial, de estatus, de objeto o sin tipo) — negativo para penalizaciones.
+
+## 🛡️ Armaduras y escudos
+
+El mismo botón **Editar** aparece en las fichas de armaduras y escudos, con su propio editor:
+
+- **Defensa**: categoría, grupo, bonificador a la CA, tope de Destreza, penalizaciones a pruebas y velocidad, y Fuerza requerida (armaduras); CA, Dureza, PV y penalización de velocidad (escudos). Una vista previa muestra lo que calculará el sistema —qué anula la Fuerza, la resistencia de especialización del grupo, los valores efectivos de un escudo con runa de refuerzo o material precioso.
+- **Resistencias, debilidades e inmunidades** con los tipos del sistema, valor fijo, igual al nivel o a la mitad del nivel, y excepciones.
+- **Modificadores defensivos** tipados a la CA, salvaciones, Percepción, habilidades o velocidad, opcionalmente solo **contra cuerpo a cuerpo, a distancia o conjuros**. En escudos, cualquier fila puede exigir el **escudo alzado**.
+- **Runas**: potencia, resiliente y runas de propiedad como fichas con nivel, precio y descripción (armaduras); runa de refuerzo (escudos).
+- **Rasgos** de armadura o de escudo, con buscador y frecuentes.
+
+Las reglas de una armadura solo valen con la armadura **puesta en su ranura, e investida si es mágica** —así funciona PF2e, y el editor lo avisa—. Las runas de propiedad de armadura, en PF2e 8.4, solo cambian nombre, nivel y precio: sus efectos no están automatizados por el sistema.
 
 ## Automatización en mesa
 
