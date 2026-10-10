@@ -729,7 +729,7 @@ export const RUNE_AUTOMATION = {
         "alwaysActive": true,
         "suboptions": [
           {
-            "label": "Original group",
+            "label": "SWE.ArmMalleableOriginal",
             "value": "original"
           },
           {

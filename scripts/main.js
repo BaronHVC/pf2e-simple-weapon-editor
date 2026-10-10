@@ -1698,17 +1698,15 @@ function healEntriesFor(actor, timing, onlyItemId = null, rollOpts = []) {
   return out;
 }
 
-// Prefer the system's own application so the result respects max HP, temporary
-// HP and the dying/wounded track. The clamped update is only a fallback.
 // Healings of one actor run one after another. The weapon and the armor
 // engines both answer the same turn-start hook, and two applications racing
 // each read the old HP, so the last write erased the other heal (caught live:
 // 4 of 4 turns lost one of two heals).
 const _healQueues = new Map();
-function applyHealing(actor, total) {
+function withHealQueue(actor, fn) {
   const key = actor?.uuid ?? actor?.id;
   const prev = _healQueues.get(key) ?? Promise.resolve();
-  const run = prev.then(() => applyHealingNow(actor, total));
+  const run = prev.then(fn);
   const tail = run.catch(() => {});
   _healQueues.set(key, tail);
   tail.then(() => {
@@ -1717,6 +1715,26 @@ function applyHealing(actor, total) {
   return run;
 }
 
+// One heal from start to finish - the full-health check, the roll, its
+// message and the application - queued as a whole: queuing only the
+// application let a second engine pass the full-health check on the old HP
+// and post a pointless roll plus an "already at full health" card.
+// All matching entries roll together as one real roll message, so the dice
+// are seen being thrown (and 3D dice modules animate them). The system's own
+// "healed for X" card is the receipt, so no extra text message is posted.
+function rollHealing(actor, formula, flavor) {
+  return withHealQueue(actor, async () => {
+    const hp = actor.system?.attributes?.hp;
+    if (hp && Number(hp.value) >= Number(hp.max)) return;
+    const roll = await new Roll(formula).evaluate();
+    if (!(Number(roll.total) > 0)) return;
+    await roll.toMessage({ speaker: ChatMessage.getSpeaker({ actor }), flavor });
+    await applyHealingNow(actor, Number(roll.total));
+  });
+}
+
+// Prefer the system's own application so the result respects max HP, temporary
+// HP and the dying/wounded track. The clamped update is only a fallback.
 async function applyHealingNow(actor, total) {
   if (!(total > 0)) return;
   // PF2e's applyDamage builds its own chat card from the token and crashes
@@ -1743,12 +1761,7 @@ async function runHealing(actor, timing, { itemId = null, rollOpts = [] } = {}) 
   const entries = healEntriesFor(actor, timing, itemId, rollOpts);
   if (!entries.length) return;
   // Healing a full-health wielder posted a pointless roll plus the system's
-  // "already at full health" card on every hit; stay quiet instead.
-  const hpNow = actor.system?.attributes?.hp;
-  if (hpNow && Number(hpNow.value) >= Number(hpNow.max)) return;
-  // All matching entries roll together as one real roll message, so the dice
-  // are seen being thrown (and 3D dice modules animate them). The system's own
-  // "healed for X" card is the receipt, so no extra text message is posted.
+  // "already at full health" card on every hit; rollHealing stays quiet then.
   const parts = [];
   const names = new Set();
   for (const { item, cond } of entries) {
@@ -1756,13 +1769,11 @@ async function runHealing(actor, timing, { itemId = null, rollOpts = [] } = {}) 
     names.add(item.name);
   }
   try {
-    const roll = await new Roll(parts.join(" + ")).evaluate();
-    if (!(Number(roll.total) > 0)) return;
-    await roll.toMessage({
-      speaker: ChatMessage.getSpeaker({ actor }),
-      flavor: `${i18n(timing === "healTurn" ? "HealTurn" : "HealHit")} · ${[...names].join(" · ")}`
-    });
-    await applyHealing(actor, Number(roll.total));
+    await rollHealing(
+      actor,
+      parts.join(" + "),
+      `${i18n(timing === "healTurn" ? "HealTurn" : "HealHit")} · ${[...names].join(" · ")}`
+    );
   } catch (err) {
     console.error(`${MODULE_ID} | healing failed`, err);
   }
@@ -2513,6 +2524,6 @@ export {
   resolveCritInput,
   isValuedCondition,
   actorMatchesCrit,
-  applyHealing,
+  rollHealing,
   isSoleExecutor
 };

@@ -760,12 +760,14 @@
   font-size: 0.85em;
   opacity: 0.95;
 }
+/* Teal, not the green of turn-start healing: a resistance card and a healing
+   card side by side read as two different things. */
 .swe-editor .swe-block-def {
-  border-color: rgba(95, 190, 126, 0.4);
-  background: rgba(95, 190, 126, 0.05);
+  border-color: rgba(79, 193, 201, 0.4);
+  background: rgba(79, 193, 201, 0.05);
 }
-.swe-editor .swe-title-def { color: #5fbe7e; }
-.swe-editor .swe-ghost-def { color: #5fbe7e; border-color: #4a8a5e; }
+.swe-editor .swe-title-def { color: #4fc1c9; }
+.swe-editor .swe-ghost-def { color: #4fc1c9; border-color: #3a8f95; }
 .swe-editor .swe-block-mods {
   border-color: rgba(111, 168, 220, 0.4);
   background: rgba(111, 168, 220, 0.05);
@@ -787,11 +789,11 @@
 }
 
 /* Condiciones por portador y runas automatizadas (armaduras) */
-.swe-editor .swe-kind-def .swe-card-head { background: rgba(95, 190, 126, 0.10); }
+.swe-editor .swe-kind-def .swe-card-head { background: rgba(79, 193, 201, 0.10); }
 .swe-editor .swe-kind-def .swe-fx-icon {
-  color: #5fbe7e;
-  background: rgba(95, 190, 126, 0.16);
-  border: 1px solid rgba(95, 190, 126, 0.5);
+  color: #4fc1c9;
+  background: rgba(79, 193, 201, 0.16);
+  border: 1px solid rgba(79, 193, 201, 0.5);
 }
 .swe-editor .swe-rune-auto {
   font-size: 0.75em;
@@ -805,6 +807,9 @@
 .swe-editor .swe-rune-auto-partial { color: #d8b95e; }
 .swe-editor .swe-rune-auto-manual { color: #9aa0aa; }
 .swe-editor .swe-rune-auto-engine { color: #7fb0d4; }
+.swe-editor .swe-rune-auto-off { color: #9aa0aa; border-style: dashed; }
+.swe-editor .swe-rune-auto-abp { color: #d08a5a; border-style: dashed; }
+.swe-editor .swe-rune-summary.swe-dim { opacity: 0.45; }
 .swe-editor .swe-rune-summary {
   font-size: 0.82em;
   opacity: 0.75;

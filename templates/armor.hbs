@@ -216,7 +216,7 @@
         {{else}}
         {{#if this.price}}<span class="swe-rune-price">{{this.price}} gp</span>{{/if}}
         {{/if}}
-        <span class="swe-rune-auto swe-rune-auto-{{this.autoCls}}" title="{{this.autoSummary}}">{{this.autoLabel}}</span>
+        <span class="swe-rune-auto swe-rune-auto-{{this.autoCls}}">{{this.autoLabel}}</span>
         {{#if this.automatable}}
         <label class="swe-pickbox" title="{{localize 'SWE.ArmRuneAutoToggle'}}">
           <input type="checkbox" name="runeOn.{{this.slug}}" {{#if this.autoOn}}checked{{/if}} />
@@ -229,7 +229,7 @@
         </span>
       </div>
       {{#if this.autoSummary}}
-      <div class="swe-rune-summary">{{this.autoSummary}}</div>
+      <div class="swe-rune-summary{{#if this.summaryDim}} swe-dim{{/if}}">{{this.autoSummary}}</div>
       {{/if}}
       {{#if this.selected}}
       <div class="swe-rune-desc">
@@ -292,7 +292,7 @@
   </fieldset>
 
   <fieldset class="swe-section swe-tabpanel{{#if (sweEq activeTab 'conds')}} active{{/if}}">
-    <legend><i class="fa-solid fa-users"></i> {{localize "SWE.Conditionals"}}</legend>
+    <legend><i class="fa-solid fa-users"></i> {{localize "SWE.ArmConditionals"}}</legend>
     <p class="swe-hint">{{localize "SWE.ArmCondHint"}}</p>
 
     {{#each acondsIndexed}}
@@ -345,6 +345,11 @@
         <input type="number" name="aconds.{{this.index}}.def.value" value="{{this.def.value}}" min="1" max="99" step="1" class="swe-narrow" />
         {{/if}}
         {{/unless}}
+        <select name="aconds.{{this.index}}.def.except" class="swe-cat" title="{{localize 'SWE.ArmExceptHint'}}">
+          {{#each this.defExceptOptions}}
+          <option value="{{this.value}}" {{#if (sweEq this.value ../def.except)}}selected{{/if}}>{{#if this.value}}{{localize "SWE.ArmExcept"}} {{/if}}{{this.label}}</option>
+          {{/each}}
+        </select>
         {{/if}}
         {{#if this.isHeal}}
         <span class="swe-card-amount">
@@ -361,7 +366,7 @@
       </div>
 
       <div class="swe-card-body">
-        <span class="swe-card-when">{{localize "SWE.CondWhen"}}</span>
+        <span class="swe-card-when">{{localize "SWE.ArmCondWhen"}}</span>
         {{#each this.criteria}}
         <div class="swe-cond-when">
           <span class="swe-tag">{{#if this.first}}{{localize "SWE.CondIf"}}{{else}}{{localize "SWE.CondAnd"}}{{/if}}</span>

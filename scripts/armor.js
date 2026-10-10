@@ -16,7 +16,7 @@ import {
   resolveCritInput,
   isValuedCondition,
   actorMatchesCrit,
-  applyHealing,
+  rollHealing,
   isSoleExecutor
 } from "./main.js";
 import { RUNE_AUTOMATION } from "./armor-runes.js";
@@ -110,10 +110,20 @@ function normalizeACond(c) {
 }
 
 // The attacker's options only exist while an attack or effect is checked
-// against the wearer: a resistance is settled when the actor is prepared, and
-// turn-start healing has no attacker at all.
-function acritInert(effect, crit) {
-  return crit.filter === "originCondition" && effect !== "mod";
+// against the wearer: a resistance is settled when the actor is prepared,
+// turn-start healing has no attacker at all, and Speed is never checked
+// against anyone. AC, saves, Perception and skill DCs can be.
+const ATTACKER_BLIND_TARGETS = ["land-speed", "all-speeds"];
+function acritInert(c, crit) {
+  if (crit.filter !== "originCondition") return false;
+  return c.effect !== "mod" || ATTACKER_BLIND_TARGETS.includes(c.mod.target);
+}
+
+// A card with a requirement that can never be checked never applies. Dropping
+// just that requirement applied a resistance to every attacker instead, while
+// the healing engine treated the same card as never met.
+function acondInert(c) {
+  return c.criteria.some((k) => acritInert(c, k));
 }
 
 function acritTerm(crit) {
@@ -131,13 +141,6 @@ function armorMatchesCrit(actor, crit) {
 
 function acondChoices(choices) {
   return { ...choices, originCondition: choices?.selfCondition ?? [] };
-}
-
-function acritText(choices, crit) {
-  const label = condLabel(acondChoices(choices), crit) ?? crit.slug;
-  if (!ACOND_STATE.includes(crit.filter)) return label;
-  const who = i18n(crit.filter === "originCondition" ? "ArmWhoAttacker" : "WhoSelf");
-  return `${who}: ${label}${Number(crit.min) > 1 ? ` \u2265${crit.min}` : ""}`;
 }
 
 function normalizeDefense(e) {
@@ -175,24 +178,38 @@ function readDefense(item) {
       .map(normalizeACond)
       .map((c) => ({ ...c, criteria: c.criteria.filter((k) => k.slug) }))
       .filter((c) => c.criteria.length),
-    runeOff: Array.isArray(raw.runeOff) ? raw.runeOff.map(String) : []
+    runeOff: Array.isArray(raw.runeOff) ? raw.runeOff.map(String) : [],
+    toggles: raw.toggles && typeof raw.toggles === "object" ? raw.toggles : {}
   };
 }
 
 // A toggleable RollOption stores the player's choice (on/off, the picked
 // suboption) inside its own rule source; regenerating the rules would reset it
-// on every save, so the previous state is copied onto the rule with the same
-// slug.
-function withToggleState(rules, previous) {
-  const bySlug = new Map(previous.filter((r) => r?.key === "RollOption" && r.slug).map((r) => [r.slug, r]));
+// on every save. The state is matched by the slug past the item id - a copy of
+// the armor (a duplicate, a drag onto an actor) gets a new id while its rules
+// keep the old one - and is also kept in the flag, so a rune whose automation
+// is switched off and on again gets its state back.
+function toggleKey(slug) {
+  return String(slug).replace(/^swe-a-(?:armor|shield)-[a-z0-9]*-/, "");
+}
+
+function toggleStates(rules, stored = {}) {
+  const out = { ...stored };
+  for (const r of rules) {
+    if (r?.key !== "RollOption" || !r.toggleable || !isDefenseRule(r)) continue;
+    const state = {};
+    if ("value" in r) state.value = r.value;
+    if ("selection" in r) state.selection = r.selection;
+    out[toggleKey(r.slug)] = state;
+  }
+  return out;
+}
+
+function withToggleState(rules, states) {
   return rules.map((r) => {
     if (r.key !== "RollOption" || !r.toggleable) return r;
-    const old = bySlug.get(r.slug);
-    if (!old) return r;
-    const out = { ...r };
-    if ("value" in old) out.value = old.value;
-    if ("selection" in old) out.selection = old.selection;
-    return out;
+    const state = states[toggleKey(r.slug)];
+    return state ? { ...r, ...state } : r;
   });
 }
 
@@ -286,8 +303,9 @@ function defenseRules(data, itemId) {
   // Wearer conditionals become native rules gated on their criteria; healing
   // has no rule element that rolls dice, so the turn-start engine applies it.
   data.conds.forEach((c, i) => {
-    const terms = c.criteria.filter((k) => !acritInert(c.effect, k)).map(acritTerm);
-    if (!terms.length || c.effect === "healTurn") return;
+    if (c.effect === "healTurn" || acondInert(c)) return;
+    const terms = c.criteria.map(acritTerm);
+    if (!terms.length) return;
     if (c.effect === "mod") {
       const m = c.mod;
       const predicate = [...terms, ...(AGAINST_TARGETS.includes(m.target) ? AGAINST_PREDICATE[m.against] ?? [] : [])];
@@ -316,7 +334,7 @@ function defenseRules(data, itemId) {
   });
   // An adopted ancestry never becomes a roll option on its own (same helper as
   // the weapon editor emits), so ancestry criteria need it published.
-  if (data.conds.some((c) => c.effect !== "healTurn" && c.criteria.some((k) => k.filter === "ancestry"))) {
+  if (data.conds.some((c) => c.effect !== "healTurn" && !acondInert(c) && c.criteria.some((k) => k.filter === "ancestry"))) {
     rules.push({
       key: "ActiveEffectLike",
       slug: `${DEF_SLUG}${tag}-adopted`,
@@ -328,26 +346,44 @@ function defenseRules(data, itemId) {
     });
   }
   // PF2e leaves armor property runes inert; the module adds the rules each
-  // rune can honestly be expressed with. Runes past the slot limit are dropped
-  // by the system itself, so they get no rules either.
+  // rune can honestly be expressed with. Each rule also requires its own rune
+  // on the armor as prepared: the system trims runes past the slot limit
+  // before publishing parent:rune:property:<rune>, so a rune removed on the
+  // system's sheet, or left without a slot by a lower potency, switches its
+  // rules off without waiting for a save here.
   // Slugs are keyed by the rune, not its position, so a rune keeps the state
   // of its sheet toggles (Energy Adaptive's type, Winged) when others are
   // added or removed; onSubmit carries that state across the regeneration.
   if (data.kind === "armor") {
-    data.runes.property.slice(0, data.runeSlots ?? data.runes.property.length).forEach((slug) => {
+    for (const slug of data.runes.property) {
       const spec = RUNE_AUTOMATION[slug];
-      if (!spec?.rules?.length || data.runeOff.includes(slug)) return;
-      const runeLabel = labelFor(armorRuneRecord(), slug);
+      if (!spec?.rules?.length || data.runeOff.includes(slug)) continue;
+      const present = `parent:rune:property:${runeOptionSlug(slug)}`;
+      const label = runeLabelKey(slug);
       spec.rules.forEach((r, j) => {
-        rules.push({
-          ...foundry.utils.deepClone(r),
-          label: runeLabel,
-          slug: `${DEF_SLUG}${tag}-r-${slug.toLowerCase()}-${j}`
-        });
+        const rule = foundry.utils.deepClone(r);
+        rule.predicate = [...(Array.isArray(rule.predicate) ? rule.predicate : []), present];
+        rules.push({ ...rule, label, slug: `${DEF_SLUG}${tag}-r-${slug.toLowerCase()}-${j}` });
       });
-    });
+    }
   }
   return rules;
+}
+
+// The rune as the system writes it in roll options (fireResistant ->
+// fire-resistant), with the system's own sluggify when it is reachable.
+function runeOptionSlug(slug) {
+  const sluggify = game.pf2e?.system?.sluggify;
+  if (typeof sluggify === "function") return sluggify(slug);
+  return slug.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
+}
+
+// Rule labels are localized when the actor is prepared, so the system's key
+// shows the rune's name in each reader's language; localized text would stay
+// in the language of whoever saved.
+function runeLabelKey(slug) {
+  const key = `PF2E.ArmorPropertyRune${slug.charAt(0).toUpperCase()}${slug.slice(1)}`;
+  return game.i18n.has(key) ? key : labelFor(armorRuneRecord(), slug);
 }
 
 /* ------------------------------------------------------------------ runes */
@@ -438,6 +474,16 @@ function abpFor(actor) {
     return false;
   }
 }
+
+// The system's ABP check on a modifier rule: an item bonus from equipment
+// that is not a penalty.
+function abpSuppresses(rule) {
+  return rule.key === "FlatModifier" && rule.type === "item" && !(Number(rule.value) < 0);
+}
+
+// The class word the rune table starts its summaries with, which the badge
+// beside it already shows.
+const AUTO_PREFIX = /^(Automated|Automatizado|Manual|Engine|Motor|Not automated|Sin automatizar):\s*/;
 
 // Mirrors the system's slot count: graded (Starfinder) armor has none, ABP
 // replaces potency with the level-based defense potency, orichalcum adds one.
@@ -622,22 +668,38 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
       const infos = await Promise.all(d.runes.property.map((slug) => armorRuneInfo(slug)));
       slots = armorPropertySlots(this.item, potency);
       const es = game.i18n.lang === "es";
+      const abp = abpFor(this.item.actor);
       runesResolved = d.runes.property.map((slug, i) => {
         const spec = RUNE_AUTOMATION[slug];
-        const cls = spec?.cls ?? "manual";
+        const specRules = spec?.rules ?? [];
+        const automatable = specRules.length > 0;
+        const autoOn = !d.runeOff.includes(slug);
+        const over = i >= slots;
+        // Under ABP the system drops every item bonus that comes from gear,
+        // so a rune made only of those does nothing there.
+        const abpDropped = abp ? specRules.filter(abpSuppresses).length : 0;
+        let cls = spec?.cls ?? "manual";
+        if (automatable && (!autoOn || over)) cls = "off";
+        else if (automatable && abpDropped === specRules.length) cls = "abp";
+        // The badge already says how much is automated; the summary keeps the
+        // rest of the sentence.
+        let summary = spec ? (es ? spec.es : spec.en).replace(AUTO_PREFIX, "") : "";
+        summary = summary.charAt(0).toUpperCase() + summary.slice(1);
+        if (cls !== "off" && cls !== "abp" && abpDropped) summary += ` ${i18n("ArmRuneAbpPartial")}`;
         return {
           slug,
           label: labelFor(armorRuneRecord(), slug),
           level: infos[i]?.level ?? null,
           price: infos[i]?.price ?? null,
           descHTML: infos[i]?.descHTML ?? null,
-          over: i >= slots,
+          over,
           selected: slug === this.selectedRune,
           autoCls: cls,
           autoLabel: i18n(`ArmRuneAuto_${cls}`),
-          autoSummary: spec ? (es ? spec.es : spec.en) : "",
-          automatable: !!spec?.rules?.length,
-          autoOn: !d.runeOff.includes(slug)
+          autoSummary: summary,
+          summaryDim: cls === "off" || cls === "abp",
+          automatable,
+          autoOn
         };
       });
     } else {
@@ -680,7 +742,7 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
           first: j === 0,
           showMin: ACOND_STATE.includes(crit.filter) && (!crit.slug || isValuedCondition(crit.slug)),
           minVal: Number(crit.min) > 0 ? crit.min : "",
-          inert: acritInert(c.effect, crit),
+          inert: acritInert(c, crit),
           display: resolved ?? crit.slug,
           dl: `swe-dl-${this.id}-${crit.filter}`,
           unknown: !!crit.slug && !resolved
@@ -747,7 +809,7 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
       acondEffectOptions: ACOND_EFFECTS.map((e) => ({ value: e, label: i18n(`ArmEffect_${e}`) })),
       acondFilterOptions: ACOND_FILTERS.map((f) => ({
         value: f,
-        label: i18n(f === "originCondition" ? "ArmFilter_originCondition" : `Filter_${f}`)
+        label: i18n(`ArmFilter_${f}`)
       })),
       dies: cfgDies,
       propCount: isArmor ? d.runes.property.length : 0,
@@ -1054,7 +1116,7 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
       }
     }
     const keep = (src.rules ?? []).filter((r) => !isDefenseRule(r));
-    if (d.kind === "armor") d.runeSlots = armorPropertySlots(this.item, d.runes.potency);
+    const toggles = toggleStates(src.rules ?? [], readDefense(this.item).toggles);
     const conds = d.conds
       .map((c) => ({ ...c, criteria: c.criteria.filter((k) => k.slug) }))
       .filter((c) => c.criteria.length);
@@ -1068,8 +1130,8 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
       "system.traits.value": [...d.traits],
       "system.speedPenalty": d.speedPenalty,
       "system.acBonus": d.acBonus,
-      "system.rules": [...keep, ...withToggleState(defenseRules(d, this.item.id), src.rules ?? [])],
-      [`flags.${MODULE_ID}.${DEF_FLAG}`]: { defenses: d.defenses, mods: d.mods, conds: d.conds, runeOff: d.runeOff }
+      "system.rules": [...keep, ...withToggleState(defenseRules(d, this.item.id), toggles)],
+      [`flags.${MODULE_ID}.${DEF_FLAG}`]: { defenses: d.defenses, mods: d.mods, conds: d.conds, runeOff: d.runeOff, toggles }
     };
     if (d.kind === "armor") {
       Object.assign(update, {
@@ -1175,8 +1237,14 @@ const EXTERNAL_FIELDS = [
 Hooks.on("updateItem", (doc, changes) => {
   const app = SimpleArmorEditor.instances.get(doc.uuid ?? doc.id);
   if (!app?.rendered) return;
+  const keys = Object.keys(foundry.utils.flattenObject(changes ?? {})).filter(
+    (k) => k !== "_id" && !k.startsWith("_stats")
+  );
+  // A player flipping a rune toggle (Energy Adaptive's type, Winged) rewrites
+  // system.rules, which the editor never shows; re-rendering for it threw
+  // away whatever the GM had typed and not saved yet.
+  if (keys.every((k) => k === "system.rules" || k.startsWith("system.rules."))) return;
   app.syncFromForm();
-  const keys = Object.keys(foundry.utils.flattenObject(changes ?? {}));
   const touched = (p) => keys.some((k) => k === p || k.startsWith(`${p}.`) || p.startsWith(`${k}.`));
   const fresh = SimpleArmorEditor.extract(doc);
   for (const [path, fields] of EXTERNAL_FIELDS) {
@@ -1198,8 +1266,7 @@ Hooks.once("ready", () => {
 // requirement the system puts on the item's rule elements.
 async function runArmorHealing(actor) {
   if (!isSoleExecutor()) return;
-  const hp = actor?.system?.attributes?.hp;
-  if (!hp || Number(hp.value) >= Number(hp.max)) return;
+  if (!actor?.system?.attributes?.hp) return;
   const entries = [];
   for (const item of actor.items ?? []) {
     if (item.type !== "armor" && item.type !== "shield") continue;
@@ -1212,13 +1279,10 @@ async function runArmorHealing(actor) {
   if (!entries.length) return;
   try {
     const formula = entries.map(({ c }) => (c.heal.die ? `${c.heal.value}${c.heal.die}` : `${c.heal.value}`)).join(" + ");
-    const roll = await new Roll(formula).evaluate();
     const names = [...new Set(entries.map(({ item, c }) => c.src || item.name))];
-    await roll.toMessage({
-      speaker: ChatMessage.getSpeaker({ actor }),
-      flavor: `${i18n("ArmHealTurn")} \u00b7 ${names.join(" \u00b7 ")}`
-    });
-    await applyHealing(actor, Number(roll.total));
+    // Queued with the weapon engine's heal for the same turn start, so the
+    // full-health check sees whichever heal landed first.
+    await rollHealing(actor, formula, `${i18n("ArmHealTurn")} \u00b7 ${names.join(" \u00b7 ")}`);
   } catch (err) {
     console.error(`${MODULE_ID} | armor healing failed`, err);
   }
