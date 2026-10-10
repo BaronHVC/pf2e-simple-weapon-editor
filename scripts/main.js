@@ -465,6 +465,54 @@ function isSweRule(r) {
   return typeof r?.label === "string" && r.label.startsWith(SWE_MARK);
 }
 
+// A field's change event fires when it loses focus, which happens the moment
+// a button is pressed. Re-rendering right then swaps the button for a new copy
+// between pointerdown and pointerup, the browser sees press and release on two
+// different elements, and the click never happens: Save needed several presses
+// after typing in a number field (reproduced with real clicks). While a button
+// or action link is held down, re-renders wait until its click has gone
+// through. Native selects are left out on purpose: their popup does not always
+// report the release, which would stall the refresh.
+function guardClicks(app) {
+  if (app._sweGuard || !app.element) return;
+  const g = { down: false, pending: false };
+  g.onDown = (ev) => {
+    if (ev.target?.closest?.('button, a[data-action], [data-action]')) g.down = true;
+  };
+  g.onUp = () => {
+    if (!g.down) return;
+    g.down = false;
+    // The click is dispatched right after pointerup; a zero delay lets it
+    // reach the original button before the deferred re-render runs.
+    setTimeout(() => {
+      if (!g.pending) return;
+      g.pending = false;
+      if (app.rendered) app.render();
+    }, 0);
+  };
+  app.element.addEventListener("pointerdown", g.onDown, true);
+  window.addEventListener("pointerup", g.onUp, true);
+  window.addEventListener("pointercancel", g.onUp, true);
+  app._sweGuard = g;
+}
+
+function releaseClickGuard(app) {
+  const g = app._sweGuard;
+  if (!g) return;
+  window.removeEventListener("pointerup", g.onUp, true);
+  window.removeEventListener("pointercancel", g.onUp, true);
+  app._sweGuard = null;
+}
+
+function renderSoon(app) {
+  const g = app._sweGuard;
+  if (g?.down) {
+    g.pending = true;
+    return;
+  }
+  app.render();
+}
+
 class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationMixin(
   foundry.applications.api.ApplicationV2
 ) {
@@ -503,6 +551,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
 
   async close(options) {
     SimpleWeaponEditor.instances.delete(this.item.uuid ?? this.item.id);
+    releaseClickGuard(this);
     return super.close(options);
   }
   static _runeInfoCache = new Map();
@@ -961,6 +1010,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
 
   _onRender(context, options) {
     super._onRender?.(context, options);
+    guardClicks(this);
     const form = this.element;
     const body = form.querySelector(".swe-body");
     if (body && this._sweScrollTop) {
@@ -972,7 +1022,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       if (isCondFilter(el)) continue;
       el.addEventListener("change", () => {
         this.syncFromForm();
-        this.render();
+        renderSoon(this);
       });
     }
     // Switching ancestry/heritage/class leaves the previously picked target
@@ -982,7 +1032,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
       if (!isCritTarget(el)) continue;
       el.addEventListener("change", () => {
         this.syncFromForm();
-        this.render();
+        renderSoon(this);
       });
     }
     // The feat list is too large to render in full, so its shared datalist is
@@ -1022,7 +1072,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
           crit.filter = el.value;
           if (!keep) crit.slug = "";
         }
-        this.render();
+        renderSoon(this);
       });
     }
   }
@@ -2340,7 +2390,7 @@ Hooks.on("updateItem", (doc, changes) => {
   );
   if (keys.length && keys.every((k) => k.startsWith(`flags.${MODULE_ID}.${PICK_FLAG}`))) return;
   app.syncFromForm();
-  app.render();
+  renderSoon(app);
 });
 
 // A hero-point reroll deletes the attack message and creates a copy that
@@ -2428,4 +2478,16 @@ Hooks.on("createChatMessage", async (message) => {
 
 // Shared with the armor and shield editor (scripts/armor.js), which builds on
 // these helpers instead of copying them.
-export { MODULE_ID, i18n, clampInt, locRecord, labelFor, resolveLabel, canEdit, BONUS_TYPES };
+export {
+  MODULE_ID,
+  i18n,
+  clampInt,
+  locRecord,
+  labelFor,
+  resolveLabel,
+  canEdit,
+  BONUS_TYPES,
+  guardClicks,
+  releaseClickGuard,
+  renderSoon
+};

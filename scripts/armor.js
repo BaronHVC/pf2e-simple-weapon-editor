@@ -6,7 +6,10 @@ import {
   labelFor,
   resolveLabel,
   canEdit,
-  BONUS_TYPES
+  BONUS_TYPES,
+  guardClicks,
+  releaseClickGuard,
+  renderSoon
 } from "./main.js";
 
 /* -------------------------------------------------------------------------- */
@@ -340,6 +343,7 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
 
   async close(options) {
     SimpleArmorEditor.instances.delete(this.item.uuid ?? this.item.id);
+    releaseClickGuard(this);
     return super.close(options);
   }
 
@@ -553,6 +557,7 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
 
   _onRender(context, options) {
     super._onRender?.(context, options);
+    guardClicks(this);
     const form = this.element;
     const body = form.querySelector(".swe-body");
     if (body && this._sweScrollTop) body.scrollTop = this._sweScrollTop;
@@ -560,7 +565,7 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
       if (el.name === "runeToAdd" || el.name === "traitToAdd") continue;
       el.addEventListener("change", () => {
         this.syncFromForm();
-        this.render();
+        renderSoon(this);
       });
     }
   }
@@ -850,7 +855,7 @@ Hooks.on("updateItem", (doc, changes) => {
     for (const f of fields) if (f in fresh) app.data[f] = foundry.utils.deepClone(fresh[f]);
   }
   if (touched("system.price")) app.data.totalGp = undefined;
-  app.render();
+  renderSoon(app);
 });
 
 Hooks.once("ready", () => {
