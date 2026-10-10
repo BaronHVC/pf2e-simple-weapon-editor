@@ -1558,7 +1558,9 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         ]
       : [];
     const update = {
-      name: d.name || this.item.name,
+      // The displayed name can be generated ("+1 Dagger") or mystified; an
+      // emptied field falls back to the stored one, not the displayed one.
+      name: String(d.name ?? "").trim() || this.item._source.name,
       "system.level.value": Number(d.level) || 0,
       "system.damage.dice": Number(d.damage.dice) || 1,
       "system.damage.die": d.damage.die,
@@ -2423,3 +2425,7 @@ Hooks.on("createChatMessage", async (message) => {
     await runHitConditions(actor, item, message);
   }
 });
+
+// Shared with the armor and shield editor (scripts/armor.js), which builds on
+// these helpers instead of copying them.
+export { MODULE_ID, i18n, clampInt, locRecord, labelFor, resolveLabel, canEdit, BONUS_TYPES };

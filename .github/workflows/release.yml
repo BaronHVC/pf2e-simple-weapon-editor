@@ -33,8 +33,28 @@ jobs:
 
       - name: Validar que las fuentes no esten rotas
         run: |
-          node --check scripts/main.js
-          echo "JS OK    scripts/main.js"
+          # Todo lo que declara module.json, y toda plantilla que usan los
+          # scripts, tiene que existir: un esmodule ausente hace que Foundry
+          # descarte el modulo entero, editor de armas incluido.
+          node -e "
+            const fs = require('fs');
+            const m = JSON.parse(fs.readFileSync('module.json', 'utf8'));
+            const files = [...(m.esmodules ?? []), ...(m.styles ?? []), ...(m.languages ?? []).map((l) => l.path)];
+            for (const f of fs.readdirSync('scripts')) {
+              const src = fs.readFileSync('scripts/' + f, 'utf8');
+              for (const t of src.matchAll(/templates\/[A-Za-z0-9_-]+\.hbs/g)) files.push(t[0]);
+            }
+            const missing = files.filter((f) => !fs.existsSync(f));
+            if (missing.length) { console.error('Faltan archivos: ' + missing.join(', ')); process.exit(1); }
+            console.log('Archivos declarados presentes: ' + files.length);
+          "
+          # Los scripts son modulos ES (main.js exporta, armor.js importa): se
+          # validan como .mjs para que node no los lea como CommonJS.
+          for f in scripts/*.js; do
+            cp "$f" "$RUNNER_TEMP/$(basename "$f" .js).mjs"
+            node --check "$RUNNER_TEMP/$(basename "$f" .js).mjs"
+            echo "JS OK    $f"
+          done
           for f in module.json lang/en.json lang/es.json; do
             node -e "JSON.parse(require('fs').readFileSync('$f','utf8'))"
             echo "JSON OK  $f"

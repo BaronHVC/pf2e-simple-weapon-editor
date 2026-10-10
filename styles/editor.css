@@ -746,3 +746,42 @@
 .swe-pick-dialog .swe-pick-row:hover { background: rgba(255, 255, 255, 0.05); }
 .swe-pick-dialog .swe-pick-amount { font-weight: 600; }
 .swe-pick-dialog .swe-pick-src { font-style: italic; opacity: 0.65; }
+
+/* Editor de armaduras y escudos */
+.swe-editor .swe-armor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px 12px;
+}
+.swe-editor .swe-armor-grid > label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.85em;
+  opacity: 0.95;
+}
+.swe-editor .swe-block-def {
+  border-color: rgba(95, 190, 126, 0.4);
+  background: rgba(95, 190, 126, 0.05);
+}
+.swe-editor .swe-title-def { color: #5fbe7e; }
+.swe-editor .swe-ghost-def { color: #5fbe7e; border-color: #4a8a5e; }
+.swe-editor .swe-block-mods {
+  border-color: rgba(111, 168, 220, 0.4);
+  background: rgba(111, 168, 220, 0.05);
+}
+.swe-editor .swe-title-mods { color: #6fa8dc; }
+.swe-editor .swe-ghost-mods { color: #6fa8dc; border-color: #4f7aa0; }
+.swe-editor .swe-armor-chip {
+  display: inline-block;
+  margin-right: 10px;
+}
+.swe-editor .swe-armor-chip + .swe-armor-chip::before {
+  content: "\00b7";
+  margin-right: 10px;
+  opacity: 0.5;
+}
+.swe-editor .swe-row-hint {
+  margin: -2px 0 6px 4px;
+  font-size: 0.82em;
+}

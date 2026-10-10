@@ -24,7 +24,8 @@
     ]
   },
   "esmodules": [
-    "scripts/main.js"
+    "scripts/main.js",
+    "scripts/armor.js"
   ],
   "styles": [
     "styles/editor.css"
