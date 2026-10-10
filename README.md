@@ -56,9 +56,11 @@ El mismo botón **Editar** aparece en las fichas de armaduras y escudos, con su 
 - **Resistencias, debilidades e inmunidades** con los tipos del sistema, valor fijo, igual al nivel o a la mitad del nivel, y excepciones.
 - **Modificadores defensivos** tipados a la CA, salvaciones, Percepción, habilidades o velocidad, opcionalmente solo **contra cuerpo a cuerpo, a distancia o conjuros**. En escudos, cualquier fila puede exigir el **escudo alzado**.
 - **Runas**: potencia, resiliente y runas de propiedad como fichas con nivel, precio y descripción (armaduras); runa de refuerzo (escudos).
+- **Runas de propiedad que funcionan**: PF2e no automatiza sus efectos, así que el módulo les agrega reglas a las 42 que se pueden expresar fielmente —la resistencia de *Acid-Resistant* y compañía, el +1 de *Slick* al Escapar, el tipo a elegir de *Energy Adaptive* desde la pestaña Acciones…—. Cada ficha dice si la runa está automatizada, en parte o queda manual, y la automatización se puede apagar runa por runa.
+- **Condiciones por portador**: las mismas que en las armas —ascendencia, herencia, clase, dote o estado de quien la lleva— más una propia de la defensa: que **el atacante** sufra un estado (por ejemplo, +2 a la CA contra un atacante asustado). El efecto puede ser un modificador defensivo, una resistencia, debilidad o inmunidad, o curación al inicio del turno.
 - **Rasgos** de armadura o de escudo, con buscador y frecuentes.
 
-Las reglas de una armadura solo valen con la armadura **puesta en su ranura, e investida si es mágica** —así funciona PF2e, y el editor lo avisa—. Las runas de propiedad de armadura, en PF2e 8.4, solo cambian nombre, nivel y precio: sus efectos no están automatizados por el sistema.
+Las reglas de una armadura solo valen con la armadura **puesta en su ranura, e investida si es mágica** —así funciona PF2e, y el editor lo avisa—. Las reglas de cada runa solo actúan mientras la runa está en la armadura y tiene ranura: si se quita desde la hoja del sistema, o se baja la potencia, sus efectos se apagan solos.
 
 ## Automatización en mesa
 
