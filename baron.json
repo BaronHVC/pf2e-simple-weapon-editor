@@ -1,0 +1,31 @@
+{
+  "mode": "public",
+  "devChannel": true,
+  "i18nPrefix": "SWE",
+  "langParity": "warn",
+  "persisted": [
+    "pf2e-simple-weapon-editor",
+    "conditionals",
+    "hitConds",
+    "healed",
+    "ridersDone",
+    "lastPicks",
+    "fort",
+    "defense",
+    "reactUses",
+    "SWE:",
+    "SWE:P:",
+    "SWE:C:",
+    "swe-cond",
+    "swe-p-",
+    "swe-a-",
+    "swe-adopted:",
+    "swe-gated",
+    "swe-atk:",
+    "swe-rider",
+    "swe-react",
+    "swe-dmg:shield-block",
+    "swe-dmg:outcome:",
+    "SWE.ArmMalleableOriginal"
+  ]
+}

@@ -1,0 +1,4 @@
+# La copia vendorizada de pf2e-baron-core se guarda siempre con LF, para que su
+# sha256 coincida con baron-core.lock.json en Windows y en la CI. Acotado a ese
+# archivo a proposito: el resto del repo conserva su normalizacion de siempre.
+scripts/baron-core.js text eol=lf
