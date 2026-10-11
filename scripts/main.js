@@ -7,12 +7,16 @@ import {
   PF2E_MODIFIER_TYPES as BONUS_TYPES,
   canEditItem,
   clampInt,
+  enrichHTML,
   escHTML,
+  formDataClass,
   guardClicks,
+  injectSheetButton,
   isSoleExecutor,
   isValuedCondition,
   labelFor,
   locRecord,
+  packIndex,
   releaseClickGuard,
   renderSoon,
   resolveLabel,
@@ -440,7 +444,6 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
     this._sweTab = "damage";
   }
 
-  static _runeIndexPromise = null;
   static instances = new Map();
 
   static open(item) {
@@ -472,15 +475,10 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
   }
   static _runeInfoCache = new Map();
 
+  // Same pack and fields as the armor editor's index, so both editors share
+  // one memoized getIndex through baron-core instead of building two.
   static async runeIndex() {
-    if (!this._runeIndexPromise) {
-      this._runeIndexPromise = (async () => {
-        const pack = game.packs.get("pf2e.equipment-srd");
-        if (!pack) return [];
-        return await pack.getIndex({ fields: ["system.slug", "type"] });
-      })();
-    }
-    return this._runeIndexPromise;
+    return packIndex("pf2e.equipment-srd", ["system.slug", "type"]);
   }
 
   static async getRuneInfo(slug) {
@@ -520,8 +518,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
         if (info.level === null) info.level = doc?.system?.level?.value ?? null;
         if (info.price === null) info.price = doc?.system?.price?.value?.gp ?? null;
         if (desc) {
-          const TE = foundry.applications.ux?.TextEditor?.implementation ?? globalThis.TextEditor;
-          info.descHTML = await TE.enrichHTML(desc, { async: true });
+          info.descHTML = await enrichHTML(desc, { async: true });
           let plain = desc.replace(/<[^>]+>/g, " ");
           plain = plain
             .replace(/@UUID\[[^\]]+\]\{([^}]+)\}/g, "$1")
@@ -994,7 +991,7 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
   }
 
   syncFromForm() {
-    const FDE = foundry.applications.ux?.FormDataExtended ?? globalThis.FormDataExtended;
+    const FDE = formDataClass();
     const o = foundry.utils.expandObject(new FDE(this.element).object);
     delete o.runeToAdd;
     delete o.traitToAdd;
@@ -2493,30 +2490,20 @@ function canEdit(item) {
   return canEditItem(item, game.settings.get(MODULE_ID, "gmOnly"));
 }
 
+// Both render hooks fire for a PF2e sheet: the key, not the swe-open class
+// (kept for editor.css), is what stops a second button.
 function injectButton(sheet) {
-  try {
-    const item = sheet.item ?? sheet.document;
-    if (!item || item.type !== "weapon") return;
-    if (item.pack) return;
-    if (!canEdit(item)) return;
-    const el = sheet.element instanceof HTMLElement ? sheet.element : sheet.element?.[0];
-    const header = el?.querySelector(".window-header");
-    if (!header || header.querySelector(".swe-open")) return;
-    const btn = document.createElement("a");
-    btn.className = "swe-open";
-    btn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i><span>${i18n("Open")}</span>`;
-    btn.setAttribute("role", "button");
-    btn.title = i18n("Title");
-    btn.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      SimpleWeaponEditor.open(item);
-    });
-    const closeBtn = header.querySelector('[data-action="close"], .header-button.close, .close');
-    header.insertBefore(btn, closeBtn ?? null);
-  } catch (err) {
-    console.error(`${MODULE_ID} | header button`, err);
-  }
+  injectSheetButton(sheet, {
+    key: `${MODULE_ID}:weapon`,
+    match: (item) => item.type === "weapon",
+    canShow: canEdit,
+    cssClass: "swe-open",
+    icon: "fa-solid fa-wand-magic-sparkles",
+    label: () => i18n("Open"),
+    title: () => i18n("Title"),
+    onClick: (item) => SimpleWeaponEditor.open(item),
+    logPrefix: `${MODULE_ID} | header button`
+  });
 }
 
 Hooks.once("init", () => {

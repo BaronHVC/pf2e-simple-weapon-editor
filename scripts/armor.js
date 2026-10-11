@@ -21,6 +21,7 @@ import {
   HITCOND_EXCLUDED
 } from "./main.js";
 import { RUNE_AUTOMATION } from "./armor-runes.js";
+import { enrichHTML, formDataClass, injectSheetButton, packIndex } from "./baron-core.js";
 
 /* -------------------------------------------------------------------------- */
 /*  Armor and shield editor                                                   */
@@ -618,16 +619,10 @@ function armorRuneRecord() {
   return out;
 }
 
-let _equipIndex = null;
+// Same pack and fields as the weapon editor's rune index: one shared,
+// memoized getIndex through baron-core.
 async function equipmentIndex() {
-  if (!_equipIndex) {
-    _equipIndex = (async () => {
-      const pack = game.packs.get("pf2e.equipment-srd");
-      if (!pack) return [];
-      return pack.getIndex({ fields: ["system.slug", "type"] });
-    })();
-  }
-  return _equipIndex;
+  return packIndex("pf2e.equipment-srd", ["system.slug", "type"]);
 }
 
 const _armorRuneInfo = new Map();
@@ -661,8 +656,7 @@ async function armorRuneInfo(slug) {
       info.price = doc?.system?.price?.value?.gp ?? null;
       const desc = doc?.system?.description?.value ?? "";
       if (desc) {
-        const TE = foundry.applications.ux?.TextEditor?.implementation ?? globalThis.TextEditor;
-        info.descHTML = await TE.enrichHTML(desc, { async: true });
+        info.descHTML = await enrichHTML(desc, { async: true });
       }
     }
   } catch (err) {
@@ -1214,7 +1208,7 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
   }
 
   syncFromForm() {
-    const FDE = foundry.applications.ux?.FormDataExtended ?? globalThis.FormDataExtended;
+    const FDE = formDataClass();
     const o = foundry.utils.expandObject(new FDE(this.element).object);
     const d = this.data;
     if (o.name !== undefined) d.name = String(o.name);
@@ -1610,30 +1604,20 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
 
 /* ------------------------------------------------------------------ hooks */
 
+// Keyed apart from the weapon button, so each editor's button is added once
+// per sheet even though both render hooks fire.
 function injectArmorButton(sheet) {
-  try {
-    const item = sheet.item ?? sheet.document;
-    if (!item || (item.type !== "armor" && item.type !== "shield")) return;
-    if (item.pack) return;
-    if (!canEdit(item)) return;
-    const el = sheet.element instanceof HTMLElement ? sheet.element : sheet.element?.[0];
-    const header = el?.querySelector(".window-header");
-    if (!header || header.querySelector(".swe-open")) return;
-    const btn = document.createElement("a");
-    btn.className = "swe-open";
-    btn.innerHTML = `<i class="fa-solid fa-shield-halved"></i><span>${i18n("Open")}</span>`;
-    btn.setAttribute("role", "button");
-    btn.title = i18n(item.type === "shield" ? "ShTitle" : "ArmTitle");
-    btn.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      SimpleArmorEditor.open(item);
-    });
-    const closeBtn = header.querySelector('[data-action="close"], .header-button.close, .close');
-    header.insertBefore(btn, closeBtn ?? null);
-  } catch (err) {
-    console.error(`${MODULE_ID} | armor header button`, err);
-  }
+  injectSheetButton(sheet, {
+    key: `${MODULE_ID}:armor`,
+    match: (item) => item.type === "armor" || item.type === "shield",
+    canShow: canEdit,
+    cssClass: "swe-open",
+    icon: "fa-solid fa-shield-halved",
+    label: () => i18n("Open"),
+    title: (item) => i18n(item.type === "shield" ? "ShTitle" : "ArmTitle"),
+    onClick: (item) => SimpleArmorEditor.open(item),
+    logPrefix: `${MODULE_ID} | armor header button`
+  });
 }
 
 Hooks.on("renderItemSheet", (app) => injectArmorButton(app));
