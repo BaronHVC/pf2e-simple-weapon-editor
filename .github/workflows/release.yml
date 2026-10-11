@@ -16,6 +16,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # El nucleo compartido viaja copiado en scripts/baron-core.js. Antes de
+      # publicar se comprueba que la copia sea byte a byte la del commit fijado
+      # en baron-core.lock.json, que la etiqueta del lock apunte a ese commit y
+      # el resto de reglas de check-module (archivos declarados, sintaxis, JSON,
+      # imports, claves de idioma, identificadores persistidos). Si algo falla,
+      # no se publica nada. --parity warn conserva el aviso de idiomas de abajo
+      # como aviso, igual que antes.
+      - name: Verificar la copia del nucleo (pf2e-baron-core)
+        run: |
+          COMMIT=$(node -p "require('./baron-core.lock.json').commit")
+          git clone --quiet https://github.com/BaronHVC/pf2e-baron-core .baron-core
+          git -C .baron-core checkout --quiet "$COMMIT"
+          node .baron-core/tools/check-module.mjs . --core-repo .baron-core --online --parity warn
+
       - name: Leer la version desde la etiqueta
         id: v
         run: |

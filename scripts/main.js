@@ -1,5 +1,25 @@
+// Shared helpers extracted to pf2e-baron-core and vendored next to this file
+// (scripts/baron-core.js, pinned by baron-core.lock.json; never edit it here).
+// The aliases keep this module's own names, so every call site and the export
+// block below are unchanged.
+import {
+  DIE_SIZES as DIES,
+  PF2E_MODIFIER_TYPES as BONUS_TYPES,
+  canEditItem,
+  clampInt,
+  escHTML,
+  guardClicks,
+  isSoleExecutor,
+  isValuedCondition,
+  labelFor,
+  locRecord,
+  releaseClickGuard,
+  renderSoon,
+  resolveLabel,
+  slugOf
+} from "./baron-core.js";
+
 const MODULE_ID = "pf2e-simple-weapon-editor";
-const DIES = ["d4", "d6", "d8", "d10", "d12"];
 const SWE_MARK = "SWE:";
 const SWE_PERS = "SWE:P:";
 const SWE_COND = "SWE:C:";
@@ -21,9 +41,6 @@ const COND_FILTERS = ["ancestry", "heritage", "class", "feat", "map", "selfCondi
 // rule predicates, thresholds included via gte.
 const STATE_FILTERS = ["selfCondition", "targetCondition"];
 const COND_EFFECTS = ["damage", "healTurn", "healHit", "attackBonus"];
-// Typed so the system's own stacking applies: same-type bonuses do not stack
-// with each other, untyped ones always do.
-const BONUS_TYPES = ["circumstance", "status", "item", "untyped"];
 const COND_FLAG = "conditionals";
 const HITCOND_FLAG = "hitConds";
 const COND_DONE_FLAG = "healed";
@@ -271,18 +288,6 @@ function readHitConds(item) {
   return raw.map(normalizeHitCond).filter((h) => h.condition && !HITCOND_EXCLUDED.has(h.condition));
 }
 
-function isValuedCondition(slug) {
-  return !!game.pf2e?.ConditionManager?.conditions?.get?.(slug)?.system?.value?.isValued;
-}
-
-function slugOf(name) {
-  if (typeof name !== "string") return "";
-  return (
-    name.slugify?.({ strict: true }) ??
-    name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
-  );
-}
-
 // Scanned from whatever packs the world actually has rather than hardcoded, so
 // homebrew and add-on content (this world also ships Starfinder 2e ancestries)
 // show up on their own. Only ever called while the editor is open.
@@ -342,18 +347,6 @@ function condLabel(choices, crit) {
   return hit ? hit.label : null;
 }
 
-// Search inputs backed by datalists hand the form a label, not a slug. An exact
-// label match (accent-insensitive, for the es locale) resolves to its value;
-// anything else comes back slugified so callers can flag it instead of silently
-// dropping what was typed.
-function resolveLabel(options, text) {
-  const t = String(text ?? "").trim();
-  if (!t) return "";
-  const norm = (s) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  const hit = (options ?? []).find((o) => norm(o.label) === norm(t));
-  return hit ? hit.value : slugOf(t);
-}
-
 function resolveCritInput(choices, filter, text) {
   return resolveLabel(choices?.[filter], text);
 }
@@ -393,18 +386,6 @@ function i18n(key) {
   return game.i18n.localize(`SWE.${key}`);
 }
 
-function locRecord(record) {
-  const out = [];
-  for (const [k, v] of Object.entries(record ?? {})) {
-    const raw = typeof v === "string" ? v : (v?.name ?? String(k));
-    let label = game.i18n.localize(raw);
-    if (label === raw && raw.includes(".")) label = k;
-    out.push({ value: k, label });
-  }
-  out.sort((a, b) => a.label.localeCompare(b.label, game.i18n.lang));
-  return out;
-}
-
 // Precision is a damage CATEGORY in PF2e, not a type: it folds into the
 // weapon's base damage type and precision-immune creatures ignore it (verified
 // in the sandbox: a precision d8 lands inside the slashing group). The editor
@@ -412,14 +393,6 @@ function locRecord(record) {
 // it, and maps it to the category on save.
 function damageTypeLabel(cfg, t) {
   return t === "precision" ? i18n("Precision") : labelFor(cfg.damageTypes, t);
-}
-
-function labelFor(record, slug) {
-  const v = (record ?? {})[slug];
-  if (v === undefined) return slug;
-  const raw = typeof v === "string" ? v : (v?.name ?? slug);
-  const label = game.i18n.localize(raw);
-  return label === raw && raw.includes(".") ? slug : label;
 }
 
 let _runeRecordCache = null;
@@ -446,15 +419,6 @@ function propertyRuneRecord() {
 
 const AUTO_LABEL_RE = /^\+\d+(d\d+)?\s/;
 
-function clampInt(v, min, max, fallback) {
-  // FormDataExtended hands an emptied number input over as null, and
-  // Number(null) is 0: without this a cleared DC became DC 1.
-  if (v === null || v === undefined || (typeof v === "string" && v.trim() === "")) return fallback;
-  const n = Number(v);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.min(max, Math.max(min, Math.trunc(n)));
-}
-
 function isCondRule(r) {
   if (typeof r?.slug === "string" && r.slug.startsWith(SWE_COND_SLUG)) return true;
   return typeof r?.label === "string" && r.label.startsWith(SWE_COND);
@@ -463,54 +427,6 @@ function isCondRule(r) {
 function isSweRule(r) {
   if (isCondRule(r)) return true;
   return typeof r?.label === "string" && r.label.startsWith(SWE_MARK);
-}
-
-// A field's change event fires when it loses focus, which happens the moment
-// a button is pressed. Re-rendering right then swaps the button for a new copy
-// between pointerdown and pointerup, the browser sees press and release on two
-// different elements, and the click never happens: Save needed several presses
-// after typing in a number field (reproduced with real clicks). While a button
-// or action link is held down, re-renders wait until its click has gone
-// through. Native selects are left out on purpose: their popup does not always
-// report the release, which would stall the refresh.
-function guardClicks(app) {
-  if (app._sweGuard || !app.element) return;
-  const g = { down: false, pending: false };
-  g.onDown = (ev) => {
-    if (ev.target?.closest?.('button, a[data-action], [data-action]')) g.down = true;
-  };
-  g.onUp = () => {
-    if (!g.down) return;
-    g.down = false;
-    // The click is dispatched right after pointerup; a zero delay lets it
-    // reach the original button before the deferred re-render runs.
-    setTimeout(() => {
-      if (!g.pending) return;
-      g.pending = false;
-      if (app.rendered) app.render();
-    }, 0);
-  };
-  app.element.addEventListener("pointerdown", g.onDown, true);
-  window.addEventListener("pointerup", g.onUp, true);
-  window.addEventListener("pointercancel", g.onUp, true);
-  app._sweGuard = g;
-}
-
-function releaseClickGuard(app) {
-  const g = app._sweGuard;
-  if (!g) return;
-  window.removeEventListener("pointerup", g.onUp, true);
-  window.removeEventListener("pointercancel", g.onUp, true);
-  app._sweGuard = null;
-}
-
-function renderSoon(app) {
-  const g = app._sweGuard;
-  if (g?.down) {
-    g.pending = true;
-    return;
-  }
-  app.render();
 }
 
 class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationMixin(
@@ -1674,10 +1590,6 @@ class SimpleWeaponEditor extends foundry.applications.api.HandlebarsApplicationM
 /*  people at the table, and non-owning players hit a permission error.         */
 /* -------------------------------------------------------------------------- */
 
-function isSoleExecutor() {
-  return !!game.users?.activeGM && game.users.activeGM === game.user;
-}
-
 function isCarried(item) {
   const carry = item?.system?.equipped?.carryType;
   return carry === "held" || carry === "worn";
@@ -2417,10 +2329,6 @@ function lastPicksOf(item, entries = pickableEntries(item)) {
   return Array.isArray(raw) ? raw.filter((k) => keys.has(k)) : [];
 }
 
-function escHTML(s) {
-  return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-}
-
 // Resolves to the picked keys; anything else means the attack was called off.
 async function askPicks(item, entries) {
   const last = new Set(lastPicksOf(item, entries));
@@ -2582,9 +2490,7 @@ function installStrikeWrapper() {
 }
 
 function canEdit(item) {
-  const gmOnly = game.settings.get(MODULE_ID, "gmOnly");
-  if (gmOnly) return game.user.isGM;
-  return game.user.isGM || item.isOwner;
+  return canEditItem(item, game.settings.get(MODULE_ID, "gmOnly"));
 }
 
 function injectButton(sheet) {
