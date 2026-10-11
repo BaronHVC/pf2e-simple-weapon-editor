@@ -151,13 +151,22 @@ jobs:
             FLAGS="--prerelease"
             echo "::notice::$TAG no es una version estable: se publica como prerelease"
           fi
+          # La nota del release es el mensaje de la etiqueta anotada. checkout
+          # convierte las etiquetas anotadas en ligeras, asi que se vuelve a traer
+          # la real; una etiqueta ligera o sin mensaje usa las notas automaticas.
+          git fetch --quiet --force origin "refs/tags/$TAG:refs/tags/$TAG" || true
+          NOTES_ARGS=(--generate-notes)
+          if [ "$(git cat-file -t "$TAG" 2>/dev/null)" = "tag" ]; then
+            git tag -l --format='%(contents)' "$TAG" > release-notes.md
+            if [ -s release-notes.md ]; then NOTES_ARGS=(--notes-file release-notes.md); fi
+          fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "El release $TAG ya existe: se reemplazan los archivos"
             gh release upload "$TAG" module.json "$ZIP_NAME" --clobber
           else
             gh release create "$TAG" \
               --title "$TAG" \
-              --generate-notes \
+              "${NOTES_ARGS[@]}" \
               $FLAGS \
               module.json "$ZIP_NAME"
           fi
