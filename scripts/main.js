@@ -1817,12 +1817,22 @@ function readGatedEntries(item) {
   return out;
 }
 
+function damageRollClass() {
+  return CONFIG.Dice.rolls.find((R) => R.name === "DamageRoll") ?? null;
+}
+
+// Hit points plus temporary hit points: what a blow can take off.
+function hpPool(actor) {
+  const hp = actor?.system?.attributes?.hp;
+  return (Number(hp?.value) || 0) + (Number(hp?.temp) || 0);
+}
+
 // The engines must hand applyDamage a typed DamageRoll: given a bare number,
 // PF2e skips immunities, weaknesses and resistances entirely (verified: 8 fire
 // against resistance 5 dealt 8 as a number, 3 as a typed roll). Precision is a
 // component of the weapon's base type; bleed is always persistent.
 async function applyTypedDamage(target, tokenDoc, amount, type, item, rollOpts = []) {
-  const DamageRoll = CONFIG.Dice.rolls.find((R) => R.name === "DamageRoll");
+  const DamageRoll = damageRollClass();
   const base = item?.system?.damage?.damageType || "untyped";
   const formula =
     type === "precision"
@@ -1831,11 +1841,7 @@ async function applyTypedDamage(target, tokenDoc, amount, type, item, rollOpts =
         ? `{(${amount})[persistent,bleed]}`
         : `{(${amount})[${type}]}`;
   const damage = DamageRoll ? await new DamageRoll(formula).evaluate() : amount;
-  const hpOf = (a) => {
-    const hp = a?.system?.attributes?.hp;
-    return (Number(hp?.value) || 0) + (Number(hp?.temp) || 0);
-  };
-  const before = hpOf(target);
+  const before = hpPool(target);
   await target.applyDamage({
     damage,
     token: tokenDoc ?? undefined,
@@ -1844,7 +1850,81 @@ async function applyTypedDamage(target, tokenDoc, amount, type, item, rollOpts =
   });
   // What actually came off, so the summary does not claim damage a
   // resistance absorbed. Bleed becomes a persistent condition instead.
-  return type === "bleed" ? amount : Math.max(0, before - hpOf(target));
+  return type === "bleed" ? amount : Math.max(0, before - hpPool(target));
+}
+
+// The check outcome a damage application belongs to travels as a roll option,
+// the way PF2e's own damage context adds check:outcome:<slug> to a Strike's
+// damage. Indexed by degree of success.
+const OUTCOME_SLUGS = ["critical-failure", "failure", "success", "critical-success"];
+
+function outcomeDegree(options) {
+  for (let degree = OUTCOME_SLUGS.length - 1; degree >= 0; degree--) {
+    if (options.has(`check:outcome:${OUTCOME_SLUGS[degree]}`)) return degree;
+  }
+  return null;
+}
+
+// Damage the engine rolls itself from a formula of typed instances, such as
+// "{(2d6+2)[piercing],(1d6)[untyped]}": an armor's own attack (Swallow-Spike)
+// deals dice of more than one type, which applyTypedDamage's single amount
+// cannot carry. It is applied as the DamageRoll it is, so immunities,
+// weaknesses and resistances act per instance, and the dice are thrown in 3D
+// like the engines' saves. PF2e builds the damage card from the token and
+// fails without one, so without a token nothing is rolled.
+// A check:outcome:<slug> roll option marks the roll the way PF2e marks a
+// Strike's damage: the roll carries that degree of success and the
+// application that outcome. On a critical success this is what lets
+// "immune to critical hits" (many engulfing oozes) and critical-hits
+// resistance see the blow, provided the caller doubled each instance PF2e's
+// way, as (2 * (...))[type]: that shape is how PF2e finds the half the
+// immunity takes back off.
+// Callers queue it with withHealQueue, as they do applyTypedDamage. The queue
+// is not re-entrant (a nested call on the same actor would wait on itself),
+// so this never queues itself.
+// Returns { roll, lost, taken }, or null when nothing could be applied. lost
+// is the hit points plus temporary hit points that actually came off, which
+// stops at the HP the target had left; taken is the damage it took after
+// immunities, weaknesses, resistances and hardness, not capped by that (what
+// a "damage equal to or above" rule such as Rupture compares). PF2e hands
+// that amount to its HP update as the damageTaken option; without one (no HP
+// update at all) taken is lost.
+async function applyRollDamage(target, tokenDoc, formula, item, rollOpts = []) {
+  const DamageRoll = damageRollClass();
+  if (!target || !tokenDoc || !DamageRoll) return null;
+  if (typeof formula !== "string" || !formula.trim()) return null;
+  if (typeof DamageRoll.validate === "function" && !DamageRoll.validate(formula)) {
+    console.error(`${MODULE_ID} | not a damage formula: ${formula}`);
+    return null;
+  }
+  const rollOptions = new Set((rollOpts ?? []).map(String));
+  const degree = outcomeDegree(rollOptions);
+  try {
+    const roll = await new DamageRoll(formula, {}, degree === null ? {} : { degreeOfSuccess: degree }).evaluate();
+    await show3dDice(roll, "the damage");
+    const before = hpPool(target);
+    const params = { damage: roll, token: tokenDoc, item, rollOptions };
+    if (degree !== null) params.outcome = DEGREE_OUTCOMES[degree];
+    // The update hook runs on this client before applyDamage resolves, for a
+    // token's synthetic actor too. Only this user's update of this actor
+    // counts: another client's damage landing meanwhile is not this blow.
+    let taken = null;
+    const hookId = Hooks.on("updateActor", (actor, _changed, options, userId) => {
+      if (userId !== game.user.id || actor?.uuid !== target.uuid) return;
+      const n = Number(options?.damageTaken);
+      if (Number.isFinite(n)) taken = n;
+    });
+    try {
+      await target.applyDamage(params);
+    } finally {
+      Hooks.off("updateActor", hookId);
+    }
+    const lost = Math.max(0, before - hpPool(target));
+    return { roll, lost, taken: taken === null ? lost : Math.max(0, taken) };
+  } catch (err) {
+    console.error(`${MODULE_ID} | could not apply the damage roll`, err);
+    return null;
+  }
 }
 
 function dealtNote(amount, dealt) {
@@ -1861,6 +1941,18 @@ const GATE_MULT = {
   none: [1, 1, 0, 0]
 };
 const DEGREE_OUTCOMES = ["criticalFailure", "failure", "success", "criticalSuccess"];
+
+// 3D dice modules animate a roll the engines keep out of the chat. Awaited, so
+// the result lands after the dice do; the animation failing never costs the
+// roll.
+async function show3dDice(roll, what) {
+  if (!game.dice3d || !roll) return;
+  try {
+    await game.dice3d.showForRoll(roll, game.user, true);
+  } catch (err) {
+    console.warn(`${MODULE_ID} | 3D dice could not show ${what}`, err);
+  }
+}
 
 // A check context names its target as {actor, token} uuids. The actor uuid of
 // an unlinked token already points at its synthetic actor; a token uuid in the
@@ -1902,13 +1994,7 @@ async function rollSilentSave(actor, type, dc, { origin = null, traits = [], ext
     return null;
   }
   const degree = roll?.options?.degreeOfSuccess ?? roll?.degreeOfSuccess;
-  if (game.dice3d && roll) {
-    try {
-      await game.dice3d.showForRoll(roll, game.user, true);
-    } catch (err) {
-      console.warn(`${MODULE_ID} | 3D dice could not show the save`, err);
-    }
-  }
+  await show3dDice(roll, "the save");
   if (typeof degree !== "number") return null;
   return {
     degree,
@@ -1969,21 +2055,63 @@ async function applyConditionValue(recipient, slug, value = null) {
 // or blind (a secret NPC attack), whose outcome must not leak to the players.
 // gmOnly covers events no chat message stands behind, such as a turn ending
 // for a creature the GM keeps hidden.
-async function postEngineSummary({ actor, token = null, title, lines, sourceMessage = null, gmOnly = false }) {
-  if (!lines?.length) return null;
+// The armor engine's prompt cards ("ask" reactions) add three optional pieces
+// that no weapon summary passes, so those cards keep this one visibility rule:
+//   flags       merged into the message's flags as given, so the caller scopes
+//               them: { [MODULE_ID]: { ask } }.
+//   recipients  user ids (or users) who must see the card: a secret event's
+//               prompt has to reach the wearer's owners as well as the GMs.
+//               It replaces the gmOnly/sourceMessage rule, and every GM is
+//               kept on it, since the GMs answer for an absent player and the
+//               active GM rewrites the card. An empty list falls back to the
+//               rule, so a slip never turns a secret card public.
+//   content     a prebuilt body, escaped by the caller, used instead of the
+//               title and lines: a prompt card rebuilds its body from its flag.
+// Returns the created message, or null when nothing was posted.
+async function postEngineSummary({
+  actor,
+  token = null,
+  title,
+  lines,
+  sourceMessage = null,
+  gmOnly = false,
+  flags = null,
+  recipients = null,
+  content = null
+}) {
+  const body = typeof content === "string" && content ? content : null;
+  if (!lines?.length && !body) return null;
   const data = {
     speaker: ChatMessage.getSpeaker(token ? { actor, token } : { actor }),
-    content: `<p><strong>${title}</strong></p><p>${lines.join("<br>")}</p>`
+    content: body ?? `<p><strong>${title}</strong></p><p>${lines.join("<br>")}</p>`
   };
-  if (gmOnly || (sourceMessage && (sourceMessage.blind || (sourceMessage.whisper?.length ?? 0) > 0))) {
+  const listed = whisperIds(recipients);
+  if (listed.length) {
+    data.whisper = [...new Set([...game.users.filter((u) => u.isGM).map((u) => u.id), ...listed])];
+  } else if (gmOnly || (sourceMessage && (sourceMessage.blind || (sourceMessage.whisper?.length ?? 0) > 0))) {
     data.whisper = game.users.filter((u) => u.isGM).map((u) => u.id);
   }
+  if (flags && typeof flags === "object") {
+    data.flags = foundry.utils.mergeObject(data.flags ?? {}, flags, { inplace: false });
+  }
   try {
-    return await ChatMessage.create(data);
+    return (await ChatMessage.create(data)) ?? null;
   } catch (err) {
     console.error(`${MODULE_ID} | could not post the summary`, err);
     return null;
   }
+}
+
+// A whisper list given as user ids or users, as ids. Users that do not exist
+// are dropped, so one stale id cannot sink the whole card.
+function whisperIds(list) {
+  const entries = Array.isArray(list) ? list : list instanceof Set ? [...list] : [];
+  const ids = new Set();
+  for (const entry of entries) {
+    const id = typeof entry === "string" ? entry : entry?.id;
+    if (id && game.users?.has(id)) ids.add(id);
+  }
+  return [...ids];
 }
 
 // Fortification (armor engine) rewrites a critical attack card into a hit and
@@ -2712,6 +2840,8 @@ export {
   DEGREE_OUTCOMES,
   withHealQueue,
   applyTypedDamage,
+  applyRollDamage,
+  show3dDice,
   findOriginAttack,
   resolveTarget,
   rollSilentSave,

@@ -218,6 +218,9 @@
         {{#if this.price}}<span class="swe-rune-price">{{this.price}} gp</span>{{/if}}
         {{/if}}
         <span class="swe-rune-auto swe-rune-auto-{{this.autoCls}}">{{this.autoLabel}}</span>
+        {{#if this.asks}}
+        <span class="swe-rune-ask" title="{{localize 'SWE.ArmRuneAsksHint'}}"><i class="fa-solid fa-hand-pointer"></i> {{localize "SWE.ArmRuneAsks"}}</span>
+        {{/if}}
         {{#if this.automatable}}
         <label class="swe-pickbox" title="{{localize 'SWE.ArmRuneAutoToggle'}}">
           <input type="checkbox" name="runeOn.{{this.slug}}" {{#if this.autoOn}}checked{{/if}} />
@@ -434,6 +437,17 @@
       {{/each}}
       <p class="swe-hint swe-react-blockhint"><i class="fa-solid fa-circle-info"></i> {{localize "SWE.ArmFortHint"}}</p>
     </div>
+    {{#if askRunes.length}}
+    <div class="swe-block swe-block-askrunes">
+      <div class="swe-block-head">
+        <span class="swe-block-title swe-title-askrunes"><i class="fa-solid fa-hand-pointer"></i> {{localize "SWE.ArmAskRunesHead"}}</span>
+      </div>
+      {{#each askRunes}}
+      <p class="swe-react-askrune{{#if this.off}} swe-dim{{/if}}"><i class="fa-solid fa-wand-magic-sparkles"></i> {{this.text}}{{#if this.off}} ({{localize "SWE.ArmRuneAuto_off"}}){{/if}}</p>
+      {{/each}}
+      <p class="swe-hint swe-react-blockhint"><i class="fa-solid fa-circle-info"></i> {{localize "SWE.ArmAskRunesHint"}}</p>
+    </div>
+    {{/if}}
     {{/if}}
 
     {{#each reactsIndexed}}
@@ -441,6 +455,9 @@
       <input type="hidden" name="reacts.{{this.index}}.id" value="{{this.id}}" />
       <div class="swe-card-head">
         <span class="swe-fx-icon"><i class="fa-solid {{this.icon}}"></i></span>
+        {{#if this.ask}}
+        <span class="swe-ask-icon" title="{{localize 'SWE.ArmReactAsks'}}"><i class="fa-solid fa-hand-pointer"></i></span>
+        {{/if}}
         <select name="reacts.{{this.index}}.trigger" class="swe-fx-select" title="{{localize 'SWE.ArmReactTriggerHint'}}">
           {{#each ../reactTriggerOptions}}
           <option value="{{this.value}}" {{#if (sweEq this.value ../trigger)}}selected{{/if}}>{{this.label}}</option>
@@ -562,8 +579,15 @@
             <option value="{{this.value}}" {{#if (sweEq this.value ../freq)}}selected{{/if}}>{{this.label}}</option>
             {{/each}}
           </select>
+          <label class="swe-pickbox swe-react-ask" title="{{localize 'SWE.ArmReactAskHint'}}">
+            <input type="checkbox" name="reacts.{{this.index}}.ask" {{#if this.ask}}checked{{/if}} />
+            <i class="fa-solid fa-hand-pointer"></i> {{localize "SWE.ArmReactAsk"}}
+          </label>
           <input type="text" name="reacts.{{this.index}}.src" value="{{this.src}}" placeholder="{{localize 'SWE.ArmReactSrcPh'}}" class="swe-src" />
         </div>
+        {{#if this.askEveryTime}}
+        <p class="swe-hint swe-row-hint"><i class="fa-solid fa-circle-info"></i> {{localize "SWE.ArmReactAskAlways"}}</p>
+        {{/if}}
 
         <span class="swe-card-when">{{localize "SWE.ArmReactReqs"}}</span>
         {{#unless this.criteria.length}}

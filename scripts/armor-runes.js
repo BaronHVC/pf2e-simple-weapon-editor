@@ -6,6 +6,9 @@
 // "engine: true" marks a rune the reaction engine (armor-engine.js) resolves in
 // play instead of, or besides, its rules; the editor lets it be switched off
 // like a rune made of rules, and the engine skips it then.
+// "ask: true" marks a rune whose use is the wearer's choice (a reaction, or
+// which spell to fight off): the engine never acts on its own for it, it posts
+// a chat row with a Use button for the wearer's owner and the GM instead.
 export const RUNE_AUTOMATION = {
   "acidResistant": {
     "cls": "full",
@@ -120,9 +123,11 @@ export const RUNE_AUTOMATION = {
     ]
   },
   "deathless": {
-    "cls": "manual",
-    "en": "Manual: 1/day reaction to lower a newly gained Doomed or Wounded by 1.",
-    "es": "Manual: reacción 1/día para reducir en 1 condenado o herido recién obtenido.",
+    "cls": "full",
+    "engine": true,
+    "ask": true,
+    "en": "When you gain doomed or wounded, a chat prompt lets you spend your reaction to lower it by 1 (once per day). It asks only when the condition is new, not when its value rises, and warns you when you are unconscious.",
+    "es": "Cuando obtienes condenado o herido, un aviso en el chat te deja usar tu reacción para reducirlo en 1 (1 vez por día). Solo pregunta si el estado es nuevo, no cuando sube su valor, y te advierte si estás inconsciente.",
     "rules": []
   },
   "electricityResistant": {
@@ -142,8 +147,10 @@ export const RUNE_AUTOMATION = {
   },
   "energyAdaptive": {
     "cls": "partial",
-    "en": "Actions-tab toggle picks the type: resistance 5. Reaction and 1/hour stay manual.",
-    "es": "Interruptor en Acciones elige el tipo: resistencia 5. Reacción y 1/hora: manuales.",
+    "engine": true,
+    "ask": true,
+    "en": "When you take acid, cold, electricity or fire damage, a chat prompt lets you spend your reaction to set resistance 5 to that type, from the next damage on (once per hour). The Actions-tab toggle still works by hand; when the armor stops being invested, clear it yourself.",
+    "es": "Cuando recibes daño de ácido, frío, electricidad o fuego, un aviso en el chat te deja usar tu reacción para fijar resistencia 5 a ese tipo, desde el siguiente daño (1 vez por hora). El interruptor de Acciones sigue funcionando a mano; si la armadura deja de estar investida, desactívalo tú.",
     "rules": [
       {
         "key": "RollOption",
@@ -497,9 +504,11 @@ export const RUNE_AUTOMATION = {
     ]
   },
   "greaterSwallowSpike": {
-    "cls": "manual",
-    "en": "Manual reaction when grabbed/held: armor attacks +22+potency for 3d6+2x potency piercing.",
-    "es": "Reacción manual al quedar agarrado: ataque +22+potencia, 3d6+2x potencia perforante.",
+    "cls": "partial",
+    "engine": true,
+    "ask": true,
+    "en": "When a creature grabs, restrains, engulfs or swallows you, a chat prompt lets you spend your reaction to have the armor attack it: +22 + potency vs its AC, 3d6 + 2×potency piercing (+2d6 untyped if it engulfs or swallows you), doubled on a critical hit; damage that reaches the Rupture value cuts you free. The 1-action follow-up stays manual.",
+    "es": "Cuando una criatura te agarra, te neutraliza, te engulle o te traga, un aviso en el chat te deja usar tu reacción para que la armadura la ataque: +22 + potencia contra su CA, 3d6 + 2×potencia perforante (+2d6 sin tipo si te engulle o te traga), doble con un crítico; si el daño alcanza el valor de Ruptura, quedas libre. El ataque de 1 acción sigue siendo manual.",
     "rules": []
   },
   "greaterWinged": {
@@ -719,9 +728,11 @@ export const RUNE_AUTOMATION = {
     ]
   },
   "majorSwallowSpike": {
-    "cls": "manual",
-    "en": "Manual reaction when grabbed/held: armor attacks +28+potency for 5d6+2x potency piercing.",
-    "es": "Reacción manual al quedar agarrado: ataque +28+potencia, 5d6+2x potencia perforante.",
+    "cls": "partial",
+    "engine": true,
+    "ask": true,
+    "en": "When a creature grabs, restrains, engulfs or swallows you, a chat prompt lets you spend your reaction to have the armor attack it: +28 + potency vs its AC, 5d6 + 2×potency piercing (+3d6 untyped if it engulfs or swallows you), doubled on a critical hit; damage that reaches the Rupture value cuts you free. The 1-action follow-up stays manual.",
+    "es": "Cuando una criatura te agarra, te neutraliza, te engulle o te traga, un aviso en el chat te deja usar tu reacción para que la armadura la ataque: +28 + potencia contra su CA, 5d6 + 2×potencia perforante (+3d6 sin tipo si te engulle o te traga), doble con un crítico; si el daño alcanza el valor de Ruptura, quedas libre. El ataque de 1 acción sigue siendo manual.",
     "rules": []
   },
   "malleable": {
@@ -1099,9 +1110,11 @@ export const RUNE_AUTOMATION = {
     ]
   },
   "spellwatch": {
-    "cls": "manual",
-    "en": "Manual: at the start of your turn, retry a save against one hostile spell affecting you.",
-    "es": "Manual: al iniciar tu turno, repite salvación contra un conjuro hostil que te afecte.",
+    "cls": "partial",
+    "engine": true,
+    "ask": true,
+    "en": "At the start of your turn in combat, a chat prompt offers a new save against an enemy's spell effect on you (one per turn, at the caster's DC); on a success the effect ends for you. Spells applied only as conditions are not detected, and when the DC can't be read the GM resolves it.",
+    "es": "Al inicio de tu turno en combate, un aviso en el chat te ofrece una nueva salvación contra el efecto de un conjuro enemigo que tengas (uno por turno, con la CD del lanzador); si la superas, el efecto termina para ti. Los conjuros aplicados solo como estados no se detectan, y si no se puede leer la CD, lo resuelve el GM.",
     "rules": []
   },
   "stanching": {
@@ -1139,9 +1152,11 @@ export const RUNE_AUTOMATION = {
     ]
   },
   "swallowSpike": {
-    "cls": "manual",
-    "en": "Manual reaction when grabbed/held: armor attacks +14+potency for 2d6+2x potency piercing.",
-    "es": "Reacción manual al quedar agarrado: ataque +14+potencia, 2d6+2x potencia perforante.",
+    "cls": "partial",
+    "engine": true,
+    "ask": true,
+    "en": "When a creature grabs, restrains, engulfs or swallows you, a chat prompt lets you spend your reaction to have the armor attack it: +14 + potency vs its AC, 2d6 + 2×potency piercing (+1d6 untyped if it engulfs or swallows you), doubled on a critical hit; damage that reaches the Rupture value cuts you free. The 1-action follow-up stays manual.",
+    "es": "Cuando una criatura te agarra, te neutraliza, te engulle o te traga, un aviso en el chat te deja usar tu reacción para que la armadura la ataque: +14 + potencia contra su CA, 2d6 + 2×potencia perforante (+1d6 sin tipo si te engulle o te traga), doble con un crítico; si el daño alcanza el valor de Ruptura, quedas libre. El ataque de 1 acción sigue siendo manual.",
     "rules": []
   },
   "trueQuenching": {

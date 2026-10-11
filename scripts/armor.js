@@ -107,6 +107,9 @@ const REACT_SAVE_OUTS = { damage: ["half", "none"], condition: ["fail", "critFai
 const SAVE_OUT_LABEL = { half: "SaveHalf", none: "SaveNone", fail: "HitWhen_fail", critFail: "HitWhen_critFail" };
 // The rune DCs the engine uses (the rune text's own flat checks).
 const FORT_RUNE_DC = { fortification: 17, greaterFortification: 14 };
+// The Reactions tab says when each rune that asks the wearer posts its prompt.
+// The Swallow-Spike grades share a trigger, so they share one line.
+const ASK_WHEN_KEY = { greaterSwallowSpike: "swallowSpike", majorSwallowSpike: "swallowSpike" };
 
 // Cards are colored by effect. Temporary HP gets its own blue-violet, in both
 // tabs, so it never reads as the green of healing.
@@ -258,6 +261,10 @@ function normalizeReact(r, kind = null) {
       out: effect === "condition" ? outCond : outDmg
     },
     freq: REACT_FREQS.includes(r?.freq) ? r.freq : "always",
+    // Off unless ticked: the card then waits in chat for the wearer's owner
+    // or the GM to click Use instead of resolving on its own. Cards saved
+    // before the option existed read false, so they keep resolving as before.
+    ask: isTruthy(r?.ask),
     src: String(r?.src ?? "").trim()
   };
 }
@@ -933,6 +940,9 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
           autoLabel: i18n(`ArmRuneAuto_${cls}`),
           autoSummary: summary,
           summaryDim: cls === "off" || cls === "abp",
+          // A rune that is a choice never acts on its own: the engine posts a
+          // Use button for the wearer instead. Only said while it can act.
+          asks: !!spec?.ask && cls !== "off" && cls !== "abp",
           automatable,
           autoOn
         };
@@ -1000,6 +1010,8 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
       // select changes still holds the old effect's outcome, which must land
       // in that effect's own slot.
       saveOutField: r.effect === "condition" ? "outCond" : "outDmg",
+      // A card that asks on every trigger posts a prompt for every hit.
+      askEveryTime: r.ask && r.freq === "always",
       criteria: r.criteria.map((crit, j) => ({ ...this.critView(crit, j), reactIndex: i }))
     }));
     // The fortification runes' own DCs, shown under the generic field so the
@@ -1010,6 +1022,21 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
           .filter(({ slug }) => slug in FORT_RUNE_DC)
           .map(({ slug, i }) => ({
             text: game.i18n.format("SWE.ArmFortRune", { rune: labelFor(armorRuneRecord(), slug), dc: FORT_RUNE_DC[slug] }),
+            off: abpNoRunes || d.runeOff.includes(slug) || i >= slots
+          }))
+      : [];
+    // The runes that are the wearer's choice post their own prompts; they are
+    // not cards and cannot be edited here, so they are only listed, dimmed
+    // the same way when they cannot act.
+    const askRunes = isArmor
+      ? d.runes.property
+          .map((slug, i) => ({ slug, i }))
+          .filter(({ slug }) => RUNE_AUTOMATION[slug]?.ask === true)
+          .map(({ slug, i }) => ({
+            text: game.i18n.format("SWE.ArmAskRuneLine", {
+              rune: labelFor(armorRuneRecord(), slug),
+              when: i18n(`ArmRuneAskWhen_${ASK_WHEN_KEY[slug] ?? slug}`)
+            }),
             off: abpNoRunes || d.runeOff.includes(slug) || i >= slots
           }))
       : [];
@@ -1078,6 +1105,7 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
       tempModeOptions: tempModeOptions(),
       reactsIndexed,
       fortRunes,
+      askRunes,
       reactTriggerOptions: REACT_TRIGGERS.filter((t) => !isArmor || !SHIELD_TRIGGERS.includes(t)).map((t) => ({
         value: t,
         label: i18n(`ArmReactTrigger_${t}`)
