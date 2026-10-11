@@ -1,9 +1,11 @@
 // Rule elements that make PF2e's inert armor property runes work, generated
 // from a mapping of each rune's text in which every rule element, selector and
 // predicate option was checked against the PF2e 8.4.1 source by an independent
-// verifier. "cls" says how much of the rune the rules cover (full, partial) or
-// why none can (manual: an activation the GM resolves; engine: needs a
-// chat-event engine, planned for a later phase).
+// verifier. "cls" says how much of the rune the module covers (full, partial)
+// or that none of it can be (manual: an activation the GM resolves).
+// "engine: true" marks a rune the reaction engine (armor-engine.js) resolves in
+// play instead of, or besides, its rules; the editor lets it be switched off
+// like a rune made of rules, and the engine skips it then.
 export const RUNE_AUTOMATION = {
   "acidResistant": {
     "cls": "full",
@@ -21,9 +23,10 @@ export const RUNE_AUTOMATION = {
     ]
   },
   "advancing": {
-    "cls": "manual",
-    "en": "Manual: free-action Stride (15 ft) after you drop a foe to 0 HP; no reactions.",
-    "es": "Manual: Zancada gratuita de 15 pies tras dejar a un enemigo a 0 PG; sin reacciones.",
+    "cls": "partial",
+    "engine": true,
+    "en": "When you drop a foe to 0 HP you get a whispered reminder of your free Stride (15 ft); you move yourself.",
+    "es": "Al dejar a un enemigo a 0 PG recibes un susurro que te recuerda tu Zancada gratuita (15 pies); el movimiento lo haces tú.",
     "rules": []
   },
   "aimAiding": {
@@ -71,9 +74,10 @@ export const RUNE_AUTOMATION = {
     ]
   },
   "bitter": {
-    "cls": "manual",
-    "en": "Manual: a creature that Engulfs you or Swallows you Whole becomes sickened 1.",
-    "es": "Manual: la criatura que te engulle o te traga entero queda indispuesta 1.",
+    "cls": "partial",
+    "engine": true,
+    "en": "A creature that Engulfs you or Swallows you Whole becomes sickened 1 when its effect lands on you; the Escape reaction stays manual.",
+    "es": "La criatura que te engulle o te traga entero queda indispuesta 1 al aplicarte su efecto; la reacción de Escapar es manual.",
     "rules": []
   },
   "coldResistant": {
@@ -235,9 +239,10 @@ export const RUNE_AUTOMATION = {
     ]
   },
   "fortification": {
-    "cls": "engine",
-    "en": "Engine: each crit taken prompts a DC 17 flat check to downgrade it. Bulk/Str +1 manual.",
-    "es": "Motor: crítico recibido pide prueba plana CD 17; éxito = impacto. Imped./Fue +1 manual.",
+    "cls": "partial",
+    "engine": true,
+    "en": "Each critical hit you take rolls a DC 17 flat check; on a success it becomes a normal hit. The +1 Bulk and Strength stay manual.",
+    "es": "Cada crítico que recibes tira una prueba plana CD 17; si la superas, pasa a impacto normal. El +1 a Impedimenta y Fuerza es manual.",
     "rules": []
   },
   "glamered": {
@@ -268,9 +273,10 @@ export const RUNE_AUTOMATION = {
     ]
   },
   "greaterAdvancing": {
-    "cls": "manual",
-    "en": "Manual: free-action Stride up to your Speed after you drop a foe to 0 HP.",
-    "es": "Manual: Zancada gratuita hasta tu Velocidad tras dejar a un enemigo a 0 PG.",
+    "cls": "partial",
+    "engine": true,
+    "en": "When you drop a foe to 0 HP you get a whispered reminder of your free Stride (up to your Speed); you move yourself.",
+    "es": "Al dejar a un enemigo a 0 PG recibes un susurro que te recuerda tu Zancada gratuita (hasta tu Velocidad); el movimiento lo haces tú.",
     "rules": []
   },
   "greaterColdResistant": {
@@ -313,9 +319,10 @@ export const RUNE_AUTOMATION = {
     ]
   },
   "greaterDread": {
-    "cls": "engine",
-    "en": "Engine: frightened foes in 30 ft save Will DC 38 at turn end or frightened doesn't drop.",
-    "es": "Motor: asustados a 30 pies salvan Voluntad CD 38 al fin de turno o su asustado no baja.",
+    "cls": "full",
+    "engine": true,
+    "en": "Frightened foes within 30 ft that see you save Will DC 38 at the end of their turn or their frightened doesn't drop (sight approximated).",
+    "es": "Los enemigos asustados a 30 pies que te ven salvan Voluntad CD 38 al final de su turno o su asustado no baja (visión aproximada).",
     "rules": []
   },
   "greaterElectricityResistant": {
@@ -349,9 +356,10 @@ export const RUNE_AUTOMATION = {
     ]
   },
   "greaterFortification": {
-    "cls": "engine",
-    "en": "Engine: each crit taken prompts a DC 14 flat check to downgrade it. Bulk/Str +1 manual.",
-    "es": "Motor: crítico recibido pide prueba plana CD 14; éxito = impacto. Imped./Fue +1 manual.",
+    "cls": "partial",
+    "engine": true,
+    "en": "Each critical hit you take rolls a DC 14 flat check; on a success it becomes a normal hit. The +1 Bulk and Strength stay manual.",
+    "es": "Cada crítico que recibes tira una prueba plana CD 14; si la superas, pasa a impacto normal. El +1 a Impedimenta y Fuerza es manual.",
     "rules": []
   },
   "greaterInvisibility": {
@@ -552,9 +560,10 @@ export const RUNE_AUTOMATION = {
     "rules": []
   },
   "lesserDread": {
-    "cls": "engine",
-    "en": "Engine: frightened foes within 30 ft save Will DC 20 at turn end or stay at least 1.",
-    "es": "Motor: enemigos asustados a 30 pies salvan Voluntad CD 20 al fin de turno o siguen en 1+.",
+    "cls": "full",
+    "engine": true,
+    "en": "Frightened foes within 30 ft that see you save Will DC 20 at the end of their turn or stay frightened 1+ (sight approximated).",
+    "es": "Los enemigos asustados a 30 pies que te ven salvan Voluntad CD 20 al final de su turno o siguen asustados 1+ (visión aproximada).",
     "rules": []
   },
   "magnetizing": {
@@ -854,9 +863,10 @@ export const RUNE_AUTOMATION = {
     "rules": []
   },
   "moderateDread": {
-    "cls": "engine",
-    "en": "Engine: frightened foes within 30 ft save Will DC 29 at turn end or stay at least 2.",
-    "es": "Motor: enemigos asustados a 30 pies salvan Voluntad CD 29 al fin de turno o siguen en 2+.",
+    "cls": "full",
+    "engine": true,
+    "en": "Frightened foes within 30 ft that see you save Will DC 29 at the end of their turn or stay frightened 2+ (sight approximated).",
+    "es": "Los enemigos asustados a 30 pies que te ven salvan Voluntad CD 29 al final de su turno o siguen asustados 2+ (visión aproximada).",
     "rules": []
   },
   "moonweave": {
@@ -1176,9 +1186,10 @@ export const RUNE_AUTOMATION = {
     ]
   },
   "unnerving": {
-    "cls": "engine",
-    "en": "Engine: whoever hits you in melee takes -1 circumstance on its next melee Strike vs you.",
-    "es": "Motor: quien te impacte c/c sufre -1 por circunstancia a su siguiente Golpe c/c contra ti.",
+    "cls": "full",
+    "engine": true,
+    "en": "Whoever hits you with a melee Strike takes -1 circumstance to its next melee Strike against you before the end of your next turn.",
+    "es": "Quien te impacta con un Golpe c/c sufre -1 por circunstancia a su siguiente Golpe c/c contra ti antes del final de tu siguiente turno.",
     "rules": []
   },
   "winged": {

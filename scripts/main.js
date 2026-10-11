@@ -1860,27 +1860,161 @@ const GATE_MULT = {
   half: [2, 1, 0.5, 0],
   none: [1, 1, 0, 0]
 };
+const DEGREE_OUTCOMES = ["criticalFailure", "failure", "success", "criticalSuccess"];
 
-async function runGatedSaves(attacker, item, message) {
+// A check context names its target as {actor, token} uuids. The actor uuid of
+// an unlinked token already points at its synthetic actor; a token uuid in the
+// actor slot is unwrapped to its actor. Anything that fails to resolve means
+// "no target", never a half-resolved one.
+async function resolveTarget(ref) {
+  if (!ref?.actor) return null;
+  try {
+    const doc = await fromUuid(ref.actor);
+    const actor = doc?.actor ?? doc;
+    if (!actor) return null;
+    const tokenDoc = ref.token ? await fromUuid(ref.token) : null;
+    return { actor, tokenDoc };
+  } catch (err) {
+    console.warn(`${MODULE_ID} | could not resolve the target`, err);
+    return null;
+  }
+}
+
+// One strike was flooding the chat with a full card per save; the engines'
+// rolls stay silent and everything lands in their single summary card. 3D dice
+// still animate when that module is present. `origin` hands the roll the
+// other side's origin:* options, and `traits` (fear, emotion...) let
+// degree-of-success adjustments such as Bravery see what the save is against.
+// Options are only passed when given, so a plain save is rolled exactly as the
+// weapon engine always rolled it.
+async function rollSilentSave(actor, type, dc, { origin = null, traits = [], extraRollOptions = [] } = {}) {
+  const stat = actor?.getStatistic?.(type);
+  if (!stat) return null;
+  const params = { dc: { value: dc }, skipDialog: true, createMessage: false };
+  if (origin) params.origin = origin;
+  if (traits?.length) params.traits = [...traits];
+  if (extraRollOptions?.length) params.extraRollOptions = [...extraRollOptions];
+  let roll;
+  try {
+    roll = await stat.roll(params);
+  } catch (err) {
+    console.warn(`${MODULE_ID} | silent save roll failed`, err);
+    return null;
+  }
+  const degree = roll?.options?.degreeOfSuccess ?? roll?.degreeOfSuccess;
+  if (game.dice3d && roll) {
+    try {
+      await game.dice3d.showForRoll(roll, game.user, true);
+    } catch (err) {
+      console.warn(`${MODULE_ID} | 3D dice could not show the save`, err);
+    }
+  }
+  if (typeof degree !== "number") return null;
+  return {
+    degree,
+    outcome: DEGREE_OUTCOMES[degree],
+    total: roll?.total ?? null,
+    d20: roll?.dice?.find?.((d) => d.faces === 20)?.total ?? null,
+    statLabel: stat.label
+  };
+}
+
+// The save part of a summary line: "Fortitude 14 vs 17 (failure)".
+function saveInfoText(save, dc) {
+  return `${save.statLabel} ${save.total ?? "?"} vs ${dc} (${i18n(`Dos${save.degree}`)})`;
+}
+
+// Applies a condition the way the engines report it. A second copy of the same
+// condition item lingers: the system deactivates one, and removing the
+// condition (standing from prone) leaves the other behind - so an existing
+// value is raised instead, and a lower or equal one is left alone. PF2e drops
+// conditions the recipient is immune to (or unaffected by) and creates nothing,
+// which used to be reported as applied.
+async function applyConditionValue(recipient, slug, value = null) {
+  if (!recipient || !slug || HITCOND_EXCLUDED.has(slug)) return "failed";
+  try {
+    const src = game.pf2e?.ConditionManager?.getCondition(slug)?.toObject();
+    if (!src) return "failed";
+    const valued = !!src.system?.value?.isValued;
+    const want = valued ? Math.max(1, Number(value) || 1) : null;
+    const existing = [...(recipient.conditions?.bySlug?.(slug) ??
+      (recipient.itemTypes?.condition ?? []).filter((c) => c.slug === slug))];
+    const current = existing.length ? Math.max(...existing.map((c) => Number(c.value) || 1)) : 0;
+    const owned = existing.find((c) => recipient.items.has(c.id));
+    if (existing.length && (!valued || current >= want)) return "already";
+    if (valued && owned) {
+      // The system's own setter also caps dying, wounded and doomed at the
+      // creature's maximum; it only acts on creatures, so anything else keeps
+      // the plain update.
+      const manager = game.pf2e.ConditionManager;
+      if (recipient.isOfType?.("creature") && typeof manager.updateConditionValue === "function") {
+        await manager.updateConditionValue(owned.id, recipient, want);
+      } else {
+        await owned.update({ "system.value.value": want });
+      }
+      return "applied";
+    }
+    if (valued) src.system.value.value = want;
+    const created = await recipient.createEmbeddedDocuments("Item", [src]);
+    return created?.length ? "applied" : "immune";
+  } catch (err) {
+    console.error(`${MODULE_ID} | condition apply failed`, err);
+    return "failed";
+  }
+}
+
+// The compact card every engine posts: a bold title and one line per piece.
+// Title and lines are HTML the caller already escaped. It goes public like the
+// weapon summaries always did, unless the event that caused it was whispered
+// or blind (a secret NPC attack), whose outcome must not leak to the players.
+// gmOnly covers events no chat message stands behind, such as a turn ending
+// for a creature the GM keeps hidden.
+async function postEngineSummary({ actor, token = null, title, lines, sourceMessage = null, gmOnly = false }) {
+  if (!lines?.length) return null;
+  const data = {
+    speaker: ChatMessage.getSpeaker(token ? { actor, token } : { actor }),
+    content: `<p><strong>${title}</strong></p><p>${lines.join("<br>")}</p>`
+  };
+  if (gmOnly || (sourceMessage && (sourceMessage.blind || (sourceMessage.whisper?.length ?? 0) > 0))) {
+    data.whisper = game.users.filter((u) => u.isGM).map((u) => u.id);
+  }
+  try {
+    return await ChatMessage.create(data);
+  } catch (err) {
+    console.error(`${MODULE_ID} | could not post the summary`, err);
+    return null;
+  }
+}
+
+// Fortification (armor engine) rewrites a critical attack card into a hit and
+// leaves its verdict on the card, but a GM can still force the Critical
+// button, so the module's own crit consumers ask the card instead of trusting
+// the damage's outcome. The reroll memo copies marks wholesale: a verdict only
+// counts while the card still reads as the hit it was rewritten to, so a
+// carried "success" on a rerolled crit that was never checked is ignored.
+function isFortifiedHit(origin) {
+  if (origin?.flags?.[MODULE_ID]?.fort?.result !== "success") return false;
+  return origin.flags?.pf2e?.context?.outcome !== "criticalSuccess";
+}
+
+// Rides on the damage the weapon riders apply on their own. Each rider lands
+// as a damage-taken card of its own, but it is part of the Strike whose damage
+// the table applies: the armor engine's "when damaged" trigger skips it, so
+// one blow fires that trigger once. IWR predicates never read it.
+const RIDER_OPT = "swe-rider";
+
+async function runGatedSaves(attacker, item, message, origin = null) {
   const entries = readGatedEntries(item);
   if (!entries.length) return;
-  const targetRef = message.flags?.pf2e?.context?.target;
-  if (!targetRef?.actor) return;
-  let targetActor;
-  let tokenDoc = null;
-  try {
-    const doc = await fromUuid(targetRef.actor);
-    targetActor = doc?.actor ?? doc;
-    tokenDoc = targetRef.token ? await fromUuid(targetRef.token) : null;
-  } catch {
-    return;
-  }
-  if (!targetActor) return;
+  const target = await resolveTarget(message.flags?.pf2e?.context?.target);
+  if (!target) return;
+  const { actor: targetActor, tokenDoc } = target;
   // A critical Strike doubles its damage, gated pieces included - the system
   // does the same with its own persistent partials on a crit. The save ladder
   // then applies on top of the doubled amount (a critically failed basic save
-  // on a critical hit is the literal composition of both rules).
-  const critHit = message.flags?.pf2e?.context?.outcome === "criticalSuccess";
+  // on a critical hit is the literal composition of both rules). A crit that
+  // fortification turned into a hit is a hit, even if Critical was forced.
+  const critHit = message.flags?.pf2e?.context?.outcome === "criticalSuccess" && !isFortifiedHit(origin);
   const cfg = CONFIG.PF2E ?? {};
   const lines = [];
   const ctxOpts = (message.flags?.pf2e?.context?.options ?? []).map(String);
@@ -1891,31 +2025,16 @@ async function runGatedSaves(attacker, item, message) {
       e.save.mode === "auto"
         ? Number(attacker.system?.attributes?.classOrSpellDC?.value) || 0
         : e.save.dc;
-    const stat = targetActor.getStatistic?.(e.save.type);
     const tl = damageTypeLabel(cfg, e.type);
     const what = `${condAmount(e)} ${tl}${e.kind === "persistent" ? ` ${i18n("PersistentShort")}` : ""}${e.kind === "splash" ? ` ${i18n("Splash").toLowerCase()}` : ""}`;
-    if (!stat) {
+    if (!targetActor.getStatistic?.(e.save.type)) {
       lines.push(`${what}: ${i18n("NoStatistic")}`);
       continue;
     }
-    let dos;
-    let rollTotal = null;
-    try {
-      // One strike was flooding the chat with a full card per save; the rolls
-      // now stay silent and everything lands in the single summary below. 3D
-      // dice still animate when that module is present.
-      const roll = await stat.roll({ dc: { value: dc }, skipDialog: true, createMessage: false });
-      dos = roll?.options?.degreeOfSuccess ?? roll?.degreeOfSuccess;
-      rollTotal = roll?.total ?? null;
-      if (game.dice3d && roll) {
-        try { await game.dice3d.showForRoll(roll, game.user, true); } catch {}
-      }
-    } catch (err) {
-      console.warn(`${MODULE_ID} | gated save roll failed`, err);
-      continue;
-    }
-    if (typeof dos !== "number") continue;
-    const saveInfo = `${stat.label} ${rollTotal ?? "?"} vs ${dc} (${i18n(`Dos${dos}`)})`;
+    const save = await rollSilentSave(targetActor, e.save.type, dc);
+    if (!save) continue;
+    const dos = save.degree;
+    const saveInfo = saveInfoText(save, dc);
     try {
       if (e.kind === "persistent") {
         // A recurring formula has no meaningful half: a failed save applies the
@@ -1944,7 +2063,7 @@ async function runGatedSaves(attacker, item, message) {
         if (doubled) amount *= 2;
         const final = Math.floor(amount * mult);
         if (final > 0) {
-          const dealt = await applyTypedDamage(targetActor, tokenDoc, final, e.type, item, ctxOpts);
+          const dealt = await applyTypedDamage(targetActor, tokenDoc, final, e.type, item, [...ctxOpts, RIDER_OPT]);
           lines.push(`${what} · ${saveInfo} → ${final} ${i18n("Applied")}${doubled ? ` (${i18n("CritMark")})` : ""}${mult === 0.5 ? ` (${i18n("SaveHalf")})` : ""}${mult === 2 ? " (x2)" : ""}${dealtNote(final, dealt)}`);
         } else {
           lines.push(`${what} · ${saveInfo} → ${i18n("Resisted")}`);
@@ -1954,12 +2073,11 @@ async function runGatedSaves(attacker, item, message) {
       console.error(`${MODULE_ID} | gated damage apply failed`, err);
     }
   }
-  if (lines.length) {
-    await ChatMessage.create({
-      speaker: ChatMessage.getSpeaker({ actor: attacker }),
-      content: `<p><strong>${i18n("AutoSaves")} · ${targetName(targetActor, tokenDoc)}</strong></p><p>${lines.join("<br>")}</p>`
-    });
-  }
+  await postEngineSummary({
+    actor: attacker,
+    title: `${i18n("AutoSaves")} · ${targetName(targetActor, tokenDoc)}`,
+    lines
+  });
 }
 
 // MAP count for a damage roll. Rolled from the attack card, the damage carries
@@ -1977,6 +2095,10 @@ function mapCountFromOptions(opts) {
 // carries the card's message id (the damage wrapper tags it, since PF2e stores
 // no link); otherwise the newest attack by the same actor, with the same
 // weapon, at the same target - and the same MAP count when the damage knows it.
+// "Same actor" is matched by uuid: unlinked tokens of one base actor (a pack
+// of wolves) share its id and its item ids, but each token's synthetic actor
+// has a uuid of its own, while a linked actor resolves to the same world actor
+// from its token or its sheet.
 function findOriginAttack(message) {
   const opts = (message.flags?.pf2e?.context?.options ?? []).map(String);
   const tag = opts.find((o) => o.startsWith("swe-atk:"));
@@ -1985,8 +2107,8 @@ function findOriginAttack(message) {
     if (tagged?.flags?.pf2e?.context?.type === "attack-roll") return tagged;
   }
   const itemId = message.item?.id;
-  const actorId = message.actor?.id;
-  if (!itemId || !actorId) return null;
+  const actorUuid = message.actor?.uuid;
+  if (!itemId || !actorUuid) return null;
   const targetToken = message.flags?.pf2e?.context?.target?.token ?? null;
   const ownMap = mapCountFromOptions(opts);
   const msgs = game.messages.contents;
@@ -1996,7 +2118,7 @@ function findOriginAttack(message) {
     const m = msgs[i];
     const c = m.flags?.pf2e?.context;
     if (c?.type !== "attack-roll") continue;
-    if (m.actor?.id !== actorId || m.item?.id !== itemId) continue;
+    if (m.actor?.uuid !== actorUuid || m.item?.id !== itemId) continue;
     if ((c.target?.token ?? null) !== targetToken) continue;
     if (ownMap !== null && (mapCountFromOptions(c.options) ?? 0) !== ownMap) continue;
     return m;
@@ -2008,9 +2130,11 @@ function mapStateFor(message, origin = null) {
   const own = mapCountFromOptions(message.flags?.pf2e?.context?.options);
   if (own !== null) return own;
   if (origin) return mapCountFromOptions(origin.flags?.pf2e?.context?.options) ?? 0;
+  // Matched by uuid for the same reason as findOriginAttack: another token of
+  // the same base actor must not lend this one its MAP.
   const itemId = message.item?.id;
-  const actorId = message.actor?.id;
-  if (!itemId || !actorId) return 0;
+  const actorUuid = message.actor?.uuid;
+  if (!itemId || !actorUuid) return 0;
   const msgs = game.messages.contents;
   let start = msgs.indexOf(message);
   if (start === -1) start = msgs.length;
@@ -2019,7 +2143,7 @@ function mapStateFor(message, origin = null) {
     const m = msgs[i];
     const c = m.flags?.pf2e?.context;
     if (c?.type !== "attack-roll") continue;
-    if (m.actor?.id !== actorId || m.item?.id !== itemId) continue;
+    if (m.actor?.uuid !== actorUuid || m.item?.id !== itemId) continue;
     return mapCountFromOptions(c.options) ?? 0;
   }
   return 0;
@@ -2035,19 +2159,10 @@ async function runMapConds(attacker, item, message, origin = null) {
   if (!conds.length) return;
   const mapN = mapStateFor(message, origin);
   if (!(mapN > 0)) return;
-  const targetRef = message.flags?.pf2e?.context?.target;
-  if (!targetRef?.actor) return;
-  let targetActor;
-  let tokenDoc = null;
-  try {
-    const doc = await fromUuid(targetRef.actor);
-    targetActor = doc?.actor ?? doc;
-    tokenDoc = targetRef.token ? await fromUuid(targetRef.token) : null;
-  } catch {
-    return;
-  }
-  if (!targetActor) return;
-  const critHit = message.flags?.pf2e?.context?.outcome === "criticalSuccess";
+  const target = await resolveTarget(message.flags?.pf2e?.context?.target);
+  if (!target) return;
+  const { actor: targetActor, tokenDoc } = target;
+  const critHit = message.flags?.pf2e?.context?.outcome === "criticalSuccess" && !isFortifiedHit(origin);
   const cfg = CONFIG.PF2E ?? {};
   const lines = [];
   const ctxOpts = message.flags?.pf2e?.context?.options ?? [];
@@ -2061,7 +2176,7 @@ async function runMapConds(attacker, item, message, origin = null) {
       }
       if (critHit) amount *= 2;
       if (!(amount > 0)) continue;
-      const dealt = await applyTypedDamage(targetActor, tokenDoc, amount, c.type, item, ctxOpts);
+      const dealt = await applyTypedDamage(targetActor, tokenDoc, amount, c.type, item, [...ctxOpts.map(String), RIDER_OPT]);
       const tl = damageTypeLabel(cfg, c.type);
       lines.push(
         `${condAmount(c)} ${tl}${c.src ? ` · ${escHTML(c.src)}` : ""} → ${amount} ${i18n("Applied")}${critHit ? ` (${i18n("CritMark")})` : ""}${dealtNote(amount, dealt)}`
@@ -2070,13 +2185,16 @@ async function runMapConds(attacker, item, message, origin = null) {
       console.error(`${MODULE_ID} | map conditional apply failed`, err);
     }
   }
-  if (lines.length) {
-    await ChatMessage.create({
-      speaker: ChatMessage.getSpeaker({ actor: attacker }),
-      content: `<p><strong>${i18n("MapDamage")} (MAP ${mapN}) · ${targetName(targetActor, tokenDoc)}</strong></p><p>${lines.join("<br>")}</p>`
-    });
-  }
+  await postEngineSummary({
+    actor: attacker,
+    title: `${i18n("MapDamage")} (MAP ${mapN}) · ${targetName(targetActor, tokenDoc)}`,
+    lines
+  });
 }
+
+// What applyConditionValue's verdict reads as on a summary line; "failed" is
+// absent on purpose (see runHitConditions).
+const APPLY_WORDS = { applied: "Applied", already: "AlreadyHas", immune: "Immune" };
 
 // Applies the on-hit conditions when damage is rolled: wielder entries land on
 // the attacker, target entries on the strike's target. A save-gated entry rolls
@@ -2086,18 +2204,9 @@ async function runMapConds(attacker, item, message, origin = null) {
 async function runHitConditions(attacker, item, message) {
   const entries = readHitConds(item);
   if (!entries.length) return;
-  const targetRef = message.flags?.pf2e?.context?.target;
-  let targetActor = null;
-  let targetToken = null;
-  try {
-    if (targetRef?.actor) {
-      const doc = await fromUuid(targetRef.actor);
-      targetActor = doc?.actor ?? doc;
-      targetToken = targetRef.token ? await fromUuid(targetRef.token) : null;
-    }
-  } catch {
-    targetActor = null;
-  }
+  const target = await resolveTarget(message.flags?.pf2e?.context?.target);
+  const targetActor = target?.actor ?? null;
+  const targetToken = target?.tokenDoc ?? null;
   const cfg = CONFIG.PF2E ?? {};
   const lines = [];
   for (const h of entries) {
@@ -2112,64 +2221,26 @@ async function runHitConditions(attacker, item, message) {
         h.saveDcMode === "auto"
           ? Number(attacker.system?.attributes?.classOrSpellDC?.value) || 0
           : h.saveDc;
-      const stat = recipient.getStatistic?.(h.saveType);
-      if (!stat) {
+      if (!recipient.getStatistic?.(h.saveType)) {
         lines.push(`${clabel} → ${rname}: ${i18n("NoStatistic")}`);
         continue;
       }
-      let dos;
-      let total = null;
-      try {
-        const roll = await stat.roll({ dc: { value: dc }, skipDialog: true, createMessage: false });
-        dos = roll?.options?.degreeOfSuccess ?? roll?.degreeOfSuccess;
-        total = roll?.total ?? null;
-        if (game.dice3d && roll) {
-          try { await game.dice3d.showForRoll(roll, game.user, true); } catch {}
-        }
-      } catch (err) {
-        console.warn(`${MODULE_ID} | hit-condition save failed`, err);
-        continue;
-      }
-      if (typeof dos !== "number") continue;
-      apply = h.saveOut === "critFail" ? dos === 0 : dos <= 1;
-      saveInfo = ` · ${stat.label} ${total ?? "?"} vs ${dc} (${i18n(`Dos${dos}`)})`;
+      const save = await rollSilentSave(recipient, h.saveType, dc);
+      if (!save) continue;
+      apply = h.saveOut === "critFail" ? save.degree === 0 : save.degree <= 1;
+      saveInfo = ` · ${saveInfoText(save, dc)}`;
     }
-    try {
-      if (apply) {
-        const src = game.pf2e.ConditionManager.getCondition(h.condition)?.toObject();
-        if (!src) continue;
-        const valued = !!src.system?.value?.isValued;
-        const label = valued ? `${clabel} ${h.value}` : clabel;
-        // A second copy of the same condition item lingers: the system
-        // deactivates one, and removing the condition (standing from prone)
-        // leaves the other behind. Raise an existing value instead.
-        const existing = [...(recipient.conditions?.bySlug?.(h.condition) ??
-          (recipient.itemTypes?.condition ?? []).filter((c) => c.slug === h.condition))];
-        const current = existing.length ? Math.max(...existing.map((c) => Number(c.value) || 1)) : 0;
-        const owned = existing.find((c) => recipient.items.has(c.id));
-        if (existing.length && (!valued || current >= h.value)) {
-          lines.push(`${label} → ${rname}${saveInfo} → ${i18n("AlreadyHas")}`);
-        } else if (valued && owned) {
-          await owned.update({ "system.value.value": h.value });
-          lines.push(`${label} → ${rname}${saveInfo} → ${i18n("Applied")}`);
-        } else {
-          if (valued) src.system.value.value = h.value;
-          await recipient.createEmbeddedDocuments("Item", [src]);
-          lines.push(`${label} → ${rname}${saveInfo} → ${i18n("Applied")}`);
-        }
-      } else {
-        lines.push(`${clabel} → ${rname}${saveInfo} → ${i18n("Resisted")}`);
-      }
-    } catch (err) {
-      console.error(`${MODULE_ID} | hit-condition apply failed`, err);
+    if (!apply) {
+      lines.push(`${clabel} → ${rname}${saveInfo} → ${i18n("Resisted")}`);
+      continue;
     }
+    const result = await applyConditionValue(recipient, h.condition, h.value);
+    // A failure was already logged; the card stays silent about it, as before.
+    if (!APPLY_WORDS[result]) continue;
+    const label = isValuedCondition(h.condition) ? `${clabel} ${h.value}` : clabel;
+    lines.push(`${label} → ${rname}${saveInfo} → ${i18n(APPLY_WORDS[result])}`);
   }
-  if (lines.length) {
-    await ChatMessage.create({
-      speaker: ChatMessage.getSpeaker({ actor: attacker }),
-      content: `<p><strong>${i18n("HitCondsHead")}</strong></p><p>${lines.join("<br>")}</p>`
-    });
-  }
+  await postEngineSummary({ actor: attacker, title: i18n("HitCondsHead"), lines });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -2273,6 +2344,18 @@ function withOptions(params, extra) {
   return { ...params, options: [...base, ...extra] };
 }
 
+// The armor engine's say on a Critical click: fortification can turn a crit
+// into a normal hit after the card was drawn (and the sheet's Critical button
+// never looks at the card at all). One gate, registered by the engine.
+let _critGate = null;
+function registerCritGate(fn) {
+  _critGate = typeof fn === "function" ? fn : null;
+}
+
+// Area-fire and auto-fire usages resolve through saves: they have no critical
+// HIT for fortification to downgrade.
+const AREA_ATTACK_TYPES = new Set(["area-fire", "auto-fire"]);
+
 function decorateStrike(strike) {
   const item = strike?.item;
   if (!item || item.type !== "weapon" || strike._sweWrapped) return;
@@ -2306,6 +2389,26 @@ function decorateStrike(strike) {
     const orig = strike[key];
     if (typeof orig !== "function") continue;
     strike[key] = async (params = {}) => {
+      // Only a click on an attack card hands over its check context; the card
+      // is the message the click happened in.
+      let originId = null;
+      if (params.checkContext) {
+        const el = params.event?.target ?? params.event?.currentTarget;
+        originId = el?.closest?.("[data-message-id]")?.dataset?.messageId ?? null;
+      }
+      // The sheet builds its damage tooltips through these same functions
+      // (getFormula), which must neither wait on the gate nor show the crit's
+      // formula as a hit's. A downgraded crit goes through the wrapped damage,
+      // so it still carries the picks and the card tag below.
+      if (key === "critical" && _critGate && !params.getFormula && !AREA_ATTACK_TYPES.has(strike.type)) {
+        let downgrade = false;
+        try {
+          downgrade = await _critGate({ strike, params, originId });
+        } catch (err) {
+          console.error(`${MODULE_ID} | critical gate failed`, err);
+        }
+        if (downgrade && typeof strike.damage === "function") return strike.damage(params);
+      }
       const extra = [];
       if (hasPicks) {
         const ctx = [...(params.checkContext?.options ?? [])].map(String);
@@ -2314,11 +2417,7 @@ function decorateStrike(strike) {
           : lastPicksOf(item).map(pickOption);
         extra.push(PICK_MADE, ...picks);
       }
-      if (params.checkContext) {
-        const el = params.event?.target ?? params.event?.currentTarget;
-        const originId = el?.closest?.("[data-message-id]")?.dataset?.messageId;
-        if (originId) extra.push(`swe-atk:${originId}`);
-      }
+      if (originId) extra.push(`swe-atk:${originId}`);
       return extra.length ? orig(withOptions(params, extra)) : orig(params);
     };
   }
@@ -2448,6 +2547,76 @@ Hooks.on("pf2e.startTurn", (combatant) => {
   if (actor) runHealing(actor, "healTurn");
 });
 
+// The armor engine (scripts/armor-engine.js) reacts to the same chat messages,
+// but through this one dispatcher instead of a listener of its own: the reroll
+// memo is consumed synchronously and its carry is awaited, so a second
+// listener would read the rerolled card before its marks landed and fire
+// twice. Running every reactor serially also keeps two handlers from both
+// passing the same "already done" check on one message.
+//   attack        (message, ctx)          an attack roll, after the carried
+//                                         marks land and before the hit/miss
+//                                         return
+//   damageRollPre (message, ctx, origin)  every damage roll, before the weapon
+//                                         riders: only for what the riders must
+//                                         wait for (fortification's verdict)
+//   damageRoll    (message, ctx, origin)  every damage roll, after the weapon
+//                                         riders; origin = its attack
+//   damageTaken   (message, ctx)          every damage-taken card
+const _reactors = new Map([
+  ["attack", []],
+  ["damageRollPre", []],
+  ["damageRoll", []],
+  ["damageTaken", []]
+]);
+
+function registerReactor(phase, fn) {
+  const list = _reactors.get(phase);
+  if (!list || typeof fn !== "function") {
+    console.error(`${MODULE_ID} | cannot register a reactor for "${phase}"`);
+    return;
+  }
+  if (!list.includes(fn)) list.push(fn);
+}
+
+// One failing reactor must not cost the others, nor the weapon riders.
+async function runReactors(phase, ...args) {
+  for (const fn of _reactors.get(phase) ?? []) {
+    try {
+      await fn(...args);
+    } catch (err) {
+      console.error(`${MODULE_ID} | ${phase} reactor failed`, err);
+    }
+  }
+}
+
+// Riders resolve when a Strike's damage is actually rolled: if the table
+// never rolls it, nothing fires. Only the Strike's own damage counts - an
+// inline @Damage from a note on the card carries the same item but is
+// sourceType "save" and has no <id>-damage domain. PF2e stamps strike damage
+// success or criticalSuccess from the button pressed, even after a miss, so
+// whether the blow landed is read off the attack it belongs to.
+// The claim is staked the moment the damage arrives, before any reactor is
+// awaited: the mark is what stops Damage-then-Critical from firing the riders
+// twice, and checking it only after the armor reactions would let two quick
+// clicks both pass it.
+async function claimRiders(message, ctx, origin) {
+  if (ctx.sourceType !== "attack") return null;
+  const actor = message.actor;
+  const item = message.item;
+  if (!actor || !item) return null;
+  if (!(ctx.domains ?? []).includes(`${item.id}-damage`)) return null;
+  const outcome = origin?.flags?.pf2e?.context?.outcome ?? ctx.outcome;
+  if (outcome !== "success" && outcome !== "criticalSuccess") return null;
+  const markOn = origin ?? message;
+  if (markOn.getFlag?.(MODULE_ID, RIDERS_DONE_FLAG)) return null;
+  try {
+    await markOn.setFlag(MODULE_ID, RIDERS_DONE_FLAG, true);
+  } catch (err) {
+    console.warn(`${MODULE_ID} | could not mark message`, err);
+  }
+  return { actor, item };
+}
+
 // "On hit" deliberately watches the attack roll and not the damage roll: in PF2e
 // damage is a separate button that can be rolled after a miss, so keying off
 // damage would heal on blows that never landed.
@@ -2457,8 +2626,7 @@ Hooks.on("createChatMessage", async (message) => {
   if (ctx?.type === "attack-roll") {
     const actor = message.actor;
     const itemId = message.item?.id;
-    if (!actor || !itemId) return;
-    const carried = ctx.isReroll ? takeRerollMarks(actor.id, itemId) : null;
+    const carried = ctx.isReroll && actor && itemId ? takeRerollMarks(actor.id, itemId) : null;
     if (carried) {
       try {
         await message.update({ [`flags.${MODULE_ID}`]: carried });
@@ -2466,6 +2634,10 @@ Hooks.on("createChatMessage", async (message) => {
         console.warn(`${MODULE_ID} | could not carry marks to the reroll`, err);
       }
     }
+    // Reactors need no attacker item (a spell attack's may not resolve), and
+    // fortification must see crits whatever the weapon side does with them.
+    await runReactors("attack", message, ctx);
+    if (!actor || !itemId) return;
     if (ctx.outcome !== "success" && ctx.outcome !== "criticalSuccess") return;
     if (message.getFlag?.(MODULE_ID, COND_DONE_FLAG)) return;
     try {
@@ -2476,36 +2648,38 @@ Hooks.on("createChatMessage", async (message) => {
     await runHealing(actor, "healHit", { itemId, rollOpts: ctx.options ?? [] });
     return;
   }
-  // Riders resolve when a Strike's damage is actually rolled: if the table
-  // never rolls it, nothing fires. Only the Strike's own damage counts - an
-  // inline @Damage from a note on the card carries the same item but is
-  // sourceType "save" and has no <id>-damage domain. PF2e stamps strike damage
-  // success or criticalSuccess from the button pressed, even after a miss, so
-  // whether the blow landed is read off the attack it belongs to.
   if (ctx?.type === "damage-roll") {
-    if (ctx.sourceType !== "attack") return;
-    const actor = message.actor;
-    const item = message.item;
-    if (!actor || !item) return;
-    if (!(ctx.domains ?? []).includes(`${item.id}-damage`)) return;
-    const origin = findOriginAttack(message);
-    const outcome = origin?.flags?.pf2e?.context?.outcome ?? ctx.outcome;
-    if (outcome !== "success" && outcome !== "criticalSuccess") return;
-    const markOn = origin ?? message;
-    if (markOn.getFlag?.(MODULE_ID, RIDERS_DONE_FLAG)) return;
+    let origin = null;
     try {
-      await markOn.setFlag(MODULE_ID, RIDERS_DONE_FLAG, true);
+      origin = findOriginAttack(message);
     } catch (err) {
-      console.warn(`${MODULE_ID} | could not mark message`, err);
+      console.warn(`${MODULE_ID} | could not pair the damage with its attack`, err);
     }
-    await runGatedSaves(actor, item, message);
-    await runMapConds(actor, item, message, origin);
-    await runHitConditions(actor, item, message);
+    const riders = await claimRiders(message, ctx, origin);
+    // Fortification's pending flat check decides what this damage was, and
+    // the riders read its verdict too, so that wait comes first.
+    await runReactors("damageRollPre", message, ctx, origin);
+    if (riders) {
+      await runGatedSaves(riders.actor, riders.item, message, origin);
+      await runMapConds(riders.actor, riders.item, message, origin);
+      await runHitConditions(riders.actor, riders.item, message);
+    }
+    // The reactions to the hit resolve after the Strike's own effects: a
+    // condition a reaction puts on the attacker must not lower the DC of the
+    // attacker's own riders. NPC strikes, spells and other weapons' damage
+    // reach the reactors too; only the riders are limited to this module's
+    // weapons.
+    await runReactors("damageRoll", message, ctx, origin);
+    return;
+  }
+  if (ctx?.type === "damage-taken") {
+    await runReactors("damageTaken", message, ctx);
   }
 });
 
-// Shared with the armor and shield editor (scripts/armor.js), which builds on
-// these helpers instead of copying them.
+// Shared with the armor and shield editor (scripts/armor.js) and the armor
+// engine (scripts/armor-engine.js), which build on these helpers instead of
+// copying them.
 export {
   MODULE_ID,
   i18n,
@@ -2525,5 +2699,27 @@ export {
   isValuedCondition,
   actorMatchesCrit,
   rollHealing,
-  isSoleExecutor
+  isSoleExecutor,
+  DIES,
+  damageTypeLabel,
+  condAmount,
+  normalizeSave,
+  HITCOND_EXCLUDED,
+  escHTML,
+  targetName,
+  dealtNote,
+  GATE_MULT,
+  DEGREE_OUTCOMES,
+  withHealQueue,
+  applyTypedDamage,
+  findOriginAttack,
+  resolveTarget,
+  rollSilentSave,
+  saveInfoText,
+  applyConditionValue,
+  postEngineSummary,
+  isFortifiedHit,
+  RIDER_OPT,
+  registerReactor,
+  registerCritGate
 };

@@ -17,7 +17,8 @@ import {
   isValuedCondition,
   actorMatchesCrit,
   rollHealing,
-  isSoleExecutor
+  isSoleExecutor,
+  HITCOND_EXCLUDED
 } from "./main.js";
 import { RUNE_AUTOMATION } from "./armor-runes.js";
 
@@ -35,7 +36,12 @@ import { RUNE_AUTOMATION } from "./armor-runes.js";
 /* -------------------------------------------------------------------------- */
 
 const DEF_FLAG = "defense";
+// Frequency stamps the reaction engine writes. They live beside the defense
+// flag, not inside it: the editor saves the whole defense object, so a stamp
+// kept in there would be overwritten by any save made while it was open.
+const USES_FLAG = "reactUses";
 const DEF_SLUG = "swe-a-";
+const DIE_SIZES = ["d4", "d6", "d8", "d10", "d12"];
 const DEF_KINDS = ["resistance", "weakness", "immunity"];
 const DEF_RULE_KEY = { resistance: "Resistance", weakness: "Weakness", immunity: "Immunity" };
 const DEF_SCALES = ["fixed", "level", "halfLevel"];
@@ -82,7 +88,39 @@ const SHIELD_FREQ_TRAITS = ["hefty-2", "deflecting-physical-ranged", "foldaway",
 // +2 AC vs a frightened attacker raised the DC from 16 to 18).
 const ACOND_FILTERS = ["ancestry", "heritage", "class", "feat", "selfCondition", "originCondition"];
 const ACOND_STATE = ["selfCondition", "originCondition"];
-const ACOND_EFFECTS = ["mod", "resist", "healTurn"];
+const ACOND_EFFECTS = ["mod", "resist", "healTurn", "tempTurn"];
+
+// Reactions: event-driven cards the reaction engine (armor-engine.js) resolves
+// in play. Unlike the conditionals they compile into no rule element - PF2e has
+// none that acts when its holder is hit - so the flag is all there is.
+const REACT_TRIGGERS = ["hit", "crit", "damaged", "block", "blockHurt", "blockZero"];
+// Only a shield can Shield Block; armor offers the first three.
+const SHIELD_TRIGGERS = ["block", "blockHurt", "blockZero"];
+const REACT_ATTACKS = ["any", "strike", "melee", "meleeNoReach", "adjacent"];
+const REACT_EFFECTS = ["damage", "condition", "tempHp"];
+const REACT_FREQS = ["always", "turn", "round", "minute", "hour", "day"];
+const REACT_SAVES = ["fortitude", "reflex", "will"];
+// A basic save halves damage or stops all of it; a condition lands on a failed
+// save or only on a critical failure, as with the weapon's hit conditions.
+const REACT_SAVE_OUTS = { damage: ["half", "none"], condition: ["fail", "critFail"] };
+// Same outcomes and multipliers as the weapon's gated saves, so same words.
+const SAVE_OUT_LABEL = { half: "SaveHalf", none: "SaveNone", fail: "HitWhen_fail", critFail: "HitWhen_critFail" };
+// The rune DCs the engine uses (the rune text's own flat checks).
+const FORT_RUNE_DC = { fortification: 17, greaterFortification: 14 };
+
+// Cards are colored by effect. Temporary HP gets its own blue-violet, in both
+// tabs, so it never reads as the green of healing.
+const ACOND_LOOK = {
+  mod: { kind: "attack", icon: "fa-shield-halved" },
+  resist: { kind: "def", icon: "fa-shield" },
+  healTurn: { kind: "heal", icon: "fa-heart" },
+  tempTurn: { kind: "temp", icon: "fa-shield-heart" }
+};
+const REACT_LOOK = {
+  damage: { kind: "damage", icon: "fa-burst" },
+  condition: { kind: "rcond", icon: "fa-bolt" },
+  tempHp: { kind: "temp", icon: "fa-shield-heart" }
+};
 
 function isTruthy(v) {
   return v === true || v === "true" || v === "on";
@@ -95,6 +133,42 @@ function normalizeACrit(crit) {
   return out;
 }
 
+// Temporary HP is a fixed amount, one that follows the level, or dice. Dice
+// leave no room for a level scale (the engine rolls them as they are), so a
+// die always comes with "fixed" and the stored shape cannot say two things.
+function normalizeTemp(t) {
+  const die = DIE_SIZES.includes(t?.die) ? t.die : "";
+  return {
+    value: clampInt(t?.value, 1, 99, 5),
+    die,
+    scale: die ? "fixed" : DEF_SCALES.includes(t?.scale) ? t.scale : "fixed"
+  };
+}
+
+// The editor shows the die and the scale as one choice ("fixed", a die, or
+// "= level"); the form hands it back as temp.mode.
+function tempMode(t) {
+  return t.die || t.scale;
+}
+
+function tempFromForm(prev, raw) {
+  const t = { ...(prev ?? {}), ...(raw ?? {}) };
+  const mode = t.mode;
+  delete t.mode;
+  if (DIE_SIZES.includes(mode)) Object.assign(t, { die: mode, scale: "fixed" });
+  else if (DEF_SCALES.includes(mode)) Object.assign(t, { die: "", scale: mode });
+  return t;
+}
+
+function tempModeOptions() {
+  return [
+    { value: "fixed", label: i18n("Fixed") },
+    ...DIE_SIZES.map((d) => ({ value: d, label: d })),
+    { value: "level", label: i18n("ArmScale_level") },
+    { value: "halfLevel", label: i18n("ArmScale_halfLevel") }
+  ];
+}
+
 function normalizeACond(c) {
   const effect = ACOND_EFFECTS.includes(c?.effect) ? c.effect : "mod";
   // Every payload is kept whatever the effect, so switching the effect back
@@ -104,9 +178,93 @@ function normalizeACond(c) {
     criteria: (Array.isArray(c?.criteria) ? c.criteria : []).map(normalizeACrit),
     mod: normalizeMod(c?.mod ?? { target: "ac", type: "circumstance", value: 1 }),
     def: normalizeDefense(c?.def ?? { kind: "resistance", type: "fire", value: 5 }),
-    heal: { value: clampInt(c?.heal?.value, 1, 99, 1), die: ["d4", "d6", "d8", "d10", "d12"].includes(c?.heal?.die) ? c.heal.die : "" },
+    heal: { value: clampInt(c?.heal?.value, 1, 99, 1), die: DIE_SIZES.includes(c?.heal?.die) ? c.heal.die : "" },
+    temp: normalizeTemp(c?.temp),
     src: String(c?.src ?? "").trim()
   };
+}
+
+function validConditionSlug(slug) {
+  const s = String(slug ?? "").trim();
+  if (!s || HITCOND_EXCLUDED.has(s)) return false;
+  const record = CONFIG.PF2E?.conditionTypes;
+  return !record || s in record;
+}
+
+function validDamageType(type) {
+  const t = String(type ?? "").trim();
+  if (!t) return false;
+  const record = CONFIG.PF2E?.damageTypes;
+  return !record || t in record;
+}
+
+// Ids key the engine's frequency stamps, which live in a flag object: only
+// characters that are safe in a flag path are kept.
+function reactId(id) {
+  return String(id ?? "").replace(/[^A-Za-z0-9_-]/g, "") || foundry.utils.randomID(8);
+}
+
+// kind is the item type when known. Armor has no Shield Block and no shield
+// Hardness, so those settings fall back to what armor can use; without a kind
+// nothing is coerced.
+function normalizeReact(r, kind = null) {
+  const isArmor = kind === "armor";
+  let trigger = REACT_TRIGGERS.includes(r?.trigger) ? r.trigger : "hit";
+  if (isArmor && SHIELD_TRIGGERS.includes(trigger)) trigger = "hit";
+  const effect = REACT_EFFECTS.includes(r?.effect) ? r.effect : "damage";
+  // Each effect keeps its own save outcome, so trying another effect and
+  // coming back finds the one chosen before. Data saved with a single "out"
+  // seeds whichever list it belongs to.
+  const dmgOuts = REACT_SAVE_OUTS.damage;
+  const condOuts = REACT_SAVE_OUTS.condition;
+  const outDmg = dmgOuts.includes(r?.save?.outDmg) ? r.save.outDmg : dmgOuts.includes(r?.save?.out) ? r.save.out : dmgOuts[0];
+  const outCond = condOuts.includes(r?.save?.outCond) ? r.save.outCond : condOuts.includes(r?.save?.out) ? r.save.out : condOuts[0];
+  // Every payload is kept whatever the effect, as in the conditionals, so
+  // switching the effect back and forth does not lose what was typed. The
+  // recipient too: only a condition reads it (damage always goes to the
+  // attacker and temporary HP to the wearer).
+  return {
+    id: reactId(r?.id),
+    trigger,
+    attack: REACT_ATTACKS.includes(r?.attack) ? r.attack : "any",
+    raised: !isArmor && isTruthy(r?.raised),
+    criteria: (Array.isArray(r?.criteria) ? r.criteria : []).map(normalizeACrit),
+    effect,
+    to: r?.to === "wearer" ? "wearer" : "attacker",
+    damage: {
+      value: clampInt(r?.damage?.value, 1, 20, 1),
+      die: DIE_SIZES.includes(r?.damage?.die) ? r.damage.die : "",
+      bonus: clampInt(r?.damage?.bonus, 0, 99, 0),
+      type: validDamageType(r?.damage?.type) ? String(r.damage.type).trim() : "piercing",
+      persistent: isTruthy(r?.damage?.persistent),
+      amount: !isArmor && r?.damage?.amount === "hardness" ? "hardness" : "roll"
+    },
+    cond: {
+      slug: validConditionSlug(r?.cond?.slug) ? String(r.cond.slug).trim() : "frightened",
+      value: clampInt(r?.cond?.value, 1, 99, 1)
+    },
+    temp: normalizeTemp(r?.temp),
+    save: {
+      type: REACT_SAVES.includes(r?.save?.type) ? r.save.type : "",
+      dc: clampInt(r?.save?.dc, 1, 60, 15),
+      // "auto" is the higher of the wearer's class and spell DC, read when the
+      // reaction resolves; the fixed DC stays as the fallback for a wearer
+      // with neither.
+      mode: r?.save?.mode === "auto" ? "auto" : "fixed",
+      outDmg,
+      outCond,
+      // The outcome of the effect shown, the one field the engine reads.
+      // Temporary HP rolls no save; it reads as damage's, never used.
+      out: effect === "condition" ? outCond : outDmg
+    },
+    freq: REACT_FREQS.includes(r?.freq) ? r.freq : "always",
+    src: String(r?.src ?? "").trim()
+  };
+}
+
+// 0 means no generic fortification; the runes bring their own DCs.
+function normalizeFort(f) {
+  return { dc: clampInt(f?.dc, 0, 20, 0) };
 }
 
 // The attacker's options only exist while an attack or effect is checked
@@ -124,6 +282,13 @@ function acritInert(c, crit) {
 // the healing engine treated the same card as never met.
 function acondInert(c) {
   return c.criteria.some((k) => acritInert(c, k));
+}
+
+// Cards resolved by an engine at turn start instead of a rule element: no
+// rule element rolls healing, and PF2e's TempHP rule only takes a number, so
+// temporary HP with a die is rolled by the reaction engine.
+function acondByEngine(c) {
+  return c.effect === "healTurn" || (c.effect === "tempTurn" && !!c.temp.die);
 }
 
 function acritTerm(crit) {
@@ -178,9 +343,31 @@ function readDefense(item) {
       .map(normalizeACond)
       .map((c) => ({ ...c, criteria: c.criteria.filter((k) => k.slug) }))
       .filter((c) => c.criteria.length),
+    // A reaction with no requirements fires on every matching event, so an
+    // empty requirement is dropped but the card is kept.
+    reacts: (Array.isArray(raw.reacts) ? raw.reacts : [])
+      .map((r) => normalizeReact(r, item?.type))
+      .map((r) => ({ ...r, criteria: r.criteria.filter((k) => k.slug) })),
+    fort: normalizeFort(item?.type === "armor" ? raw.fort : null),
     runeOff: Array.isArray(raw.runeOff) ? raw.runeOff.map(String) : [],
     toggles: raw.toggles && typeof raw.toggles === "object" ? raw.toggles : {}
   };
+}
+
+// Worn gear counts only while equipped and, when it can be, invested: the same
+// requirement the system puts on the item's own rule elements.
+function isGearActive(item) {
+  return !!item?.isEquipped && item.isInvested !== false;
+}
+
+// The property runes the engine may act on: the armor as prepared (the system
+// already drops runes past the slot limit) minus those whose automation was
+// switched off in the editor. Shields carry no property runes.
+function activeRunesOf(item) {
+  if (item?.type !== "armor") return [];
+  const off = item._source?.flags?.[MODULE_ID]?.[DEF_FLAG]?.runeOff;
+  const offList = Array.isArray(off) ? off.map(String) : [];
+  return [...new Set(item.system?.runes?.property ?? [])].filter((slug) => !offList.includes(slug));
 }
 
 // A toggleable RollOption stores the player's choice (on/off, the picked
@@ -301,12 +488,28 @@ function defenseRules(data, itemId) {
     rules.push(rule);
   });
   // Wearer conditionals become native rules gated on their criteria; healing
-  // has no rule element that rolls dice, so the turn-start engine applies it.
+  // and rolled temporary HP have no rule element that rolls dice, so the
+  // turn-start engines apply them.
   data.conds.forEach((c, i) => {
-    if (c.effect === "healTurn" || acondInert(c)) return;
+    if (acondByEngine(c) || acondInert(c)) return;
     const terms = c.criteria.map(acritTerm);
     if (!terms.length) return;
-    if (c.effect === "mod") {
+    if (c.effect === "tempTurn") {
+      // The system's own rule: higher value only, granted in its turn-start
+      // pipeline on the active GM. onCreate stays off, or dropping the armor
+      // onto an actor would grant the temporary HP right there.
+      const t = c.temp;
+      rules.push({
+        key: "TempHP",
+        slug: `${DEF_SLUG}${tag}-c${i}`,
+        // A key, not text: the label is localized when the actor is
+        // prepared, so each reader sees it in their own language.
+        label: c.src || "SWE.ArmTempTurn",
+        value: t.scale === "fixed" ? t.value : DEF_SCALE_FORMULA[t.scale],
+        events: { onCreate: false, onTurnStart: true },
+        predicate: terms
+      });
+    } else if (c.effect === "mod") {
       const m = c.mod;
       const predicate = [...terms, ...(AGAINST_TARGETS.includes(m.target) ? AGAINST_PREDICATE[m.against] ?? [] : [])];
       rules.push({
@@ -334,7 +537,7 @@ function defenseRules(data, itemId) {
   });
   // An adopted ancestry never becomes a roll option on its own (same helper as
   // the weapon editor emits), so ancestry criteria need it published.
-  if (data.conds.some((c) => c.effect !== "healTurn" && !acondInert(c) && c.criteria.some((k) => k.filter === "ancestry"))) {
+  if (data.conds.some((c) => !acondByEngine(c) && !acondInert(c) && c.criteria.some((k) => k.filter === "ancestry"))) {
     rules.push({
       key: "ActiveEffectLike",
       slug: `${DEF_SLUG}${tag}-adopted`,
@@ -475,6 +678,23 @@ function abpFor(actor) {
   }
 }
 
+// "ABP: Disallow Property Runes": the system empties system.runes.property
+// while preparing the armor, so neither the rune rules (predicated on the
+// rune being there) nor the engine (activeRunesOf reads the prepared runes)
+// see any rune at all.
+function abpStripsRunes(actor) {
+  if (!abpFor(actor)) return false;
+  let variant = game.pf2e?.settings?.variants?.abp;
+  if (variant === undefined) {
+    try {
+      variant = game.settings.get("pf2e", "automaticBonusVariant");
+    } catch {
+      return false;
+    }
+  }
+  return variant === "ABPRulesAsWritten";
+}
+
 // The system's ABP check on a modifier rule: an item bonus from equipment
 // that is not a penalty.
 function abpSuppresses(rule) {
@@ -559,6 +779,8 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
       defenses: def.defenses,
       mods: def.mods,
       conds: def.conds,
+      reacts: def.reacts,
+      fort: def.fort,
       runeOff: def.runeOff,
       freeMode: false
     };
@@ -615,7 +837,11 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
       sweAddACond: SimpleArmorEditor.actAddACond,
       sweRemoveACond: SimpleArmorEditor.actRemoveACond,
       sweAddACrit: SimpleArmorEditor.actAddACrit,
-      sweRemoveACrit: SimpleArmorEditor.actRemoveACrit
+      sweRemoveACrit: SimpleArmorEditor.actRemoveACrit,
+      sweAddReact: SimpleArmorEditor.actAddReact,
+      sweRemoveReact: SimpleArmorEditor.actRemoveReact,
+      sweAddRCrit: SimpleArmorEditor.actAddRCrit,
+      sweRemoveRCrit: SimpleArmorEditor.actRemoveRCrit
     }
   };
 
@@ -646,6 +872,9 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
     const notes = [];
     let runesResolved = [];
     let slots = 0;
+    // Read by the rune cards and by the fortification lines of the Reactions
+    // tab: under this ABP variant the armor has no property runes at all.
+    const abpNoRunes = isArmor && abpStripsRunes(this.item.actor);
     if (isArmor) {
       const potency = Number(d.runes.potency) || 0;
       const str = d.strength === "" ? null : Number(d.strength);
@@ -672,15 +901,21 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
       runesResolved = d.runes.property.map((slug, i) => {
         const spec = RUNE_AUTOMATION[slug];
         const specRules = spec?.rules ?? [];
-        const automatable = specRules.length > 0;
+        // A rune the reaction engine resolves can be switched off like one
+        // made of rules: the engine skips runes listed in runeOff.
+        const automatable = specRules.length > 0 || spec?.engine === true;
         const autoOn = !d.runeOff.includes(slug);
         const over = i >= slots;
         // Under ABP the system drops every item bonus that comes from gear,
-        // so a rune made only of those does nothing there.
+        // so a rune made only of those does nothing there. What the engine
+        // does for a rune is not an item bonus, so that alone never silences
+        // it - but the "Disallow Property Runes" variant removes the runes
+        // themselves, and then nothing of any rune applies.
         const abpDropped = abp ? specRules.filter(abpSuppresses).length : 0;
         let cls = spec?.cls ?? "manual";
         if (automatable && (!autoOn || over)) cls = "off";
-        else if (automatable && abpDropped === specRules.length) cls = "abp";
+        else if (automatable && abpNoRunes) cls = "abp";
+        else if (specRules.length && abpDropped === specRules.length && !spec?.engine) cls = "abp";
         // The badge already says how much is automated; the summary keeps the
         // rest of the sentence.
         let summary = spec ? (es ? spec.es : spec.en).replace(AUTO_PREFIX, "") : "";
@@ -720,35 +955,64 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
     for (const def of d.defenses) preview.push(defenseText(def));
     const choices = await condChoices();
     this._condChoices = acondChoices(choices);
-    const cfgDies = ["d4", "d6", "d8", "d10", "d12"];
     const acondsIndexed = d.conds.map((c, i) => ({
       ...c,
       index: i,
       isMod: c.effect === "mod",
       isResist: c.effect === "resist",
       isHeal: c.effect === "healTurn",
-      kind: c.effect === "mod" ? "attack" : c.effect === "resist" ? "def" : "heal",
-      icon: c.effect === "mod" ? "fa-shield-halved" : c.effect === "resist" ? "fa-shield" : "fa-heart",
+      isTemp: c.effect === "tempTurn",
+      ...ACOND_LOOK[c.effect],
       modAgainstApplies: AGAINST_TARGETS.includes(c.mod.target),
       defIsImmunity: c.def.kind === "immunity",
       defTypeOptions: iwrOptions(c.def.kind),
       defExceptOptions: [{ value: "", label: "\u2014" }, ...iwrOptions(c.def.kind)],
-      criteria: c.criteria.map((crit, j) => {
-        const resolved = condLabel(this._condChoices, crit);
-        return {
-          ...crit,
-          index: j,
-          condIndex: i,
-          first: j === 0,
-          showMin: ACOND_STATE.includes(crit.filter) && (!crit.slug || isValuedCondition(crit.slug)),
-          minVal: Number(crit.min) > 0 ? crit.min : "",
-          inert: acritInert(c, crit),
-          display: resolved ?? crit.slug,
-          dl: `swe-dl-${this.id}-${crit.filter}`,
-          unknown: !!crit.slug && !resolved
-        };
-      })
+      tempMode: tempMode(c.temp),
+      tempShowValue: c.temp.scale === "fixed",
+      criteria: c.criteria.map((crit, j) => ({
+        ...this.critView(crit, j),
+        condIndex: i,
+        inert: acritInert(c, crit)
+      }))
     }));
+    // The attacker criterion needs no inert warning on a reaction: the engine
+    // holds the attacker when the reaction resolves.
+    const reactsIndexed = d.reacts.map((r, i) => ({
+      ...r,
+      index: i,
+      ...REACT_LOOK[r.effect],
+      isDamage: r.effect === "damage",
+      isCond: r.effect === "condition",
+      isTemp: r.effect === "tempHp",
+      // Damage only ever goes to the attacker and temporary HP to the
+      // wearer, so the recipient is shown, not asked (the condition's stored
+      // choice waits for a switch back).
+      toLocked: r.effect !== "condition",
+      toLabel: i18n(`ArmReactTo_${r.effect === "damage" ? "attacker" : r.effect === "tempHp" ? "wearer" : r.to}`),
+      dmgRolled: r.damage.amount !== "hardness",
+      condValued: isValuedCondition(r.cond.slug),
+      tempMode: tempMode(r.temp),
+      tempShowValue: r.temp.scale === "fixed",
+      hasSave: r.effect !== "tempHp",
+      saveAuto: r.save.mode === "auto",
+      saveOutOptions: (REACT_SAVE_OUTS[r.effect] ?? []).map((o) => ({ value: o, label: i18n(SAVE_OUT_LABEL[o]) })),
+      // Named after the effect it belongs to: the form posted when the effect
+      // select changes still holds the old effect's outcome, which must land
+      // in that effect's own slot.
+      saveOutField: r.effect === "condition" ? "outCond" : "outDmg",
+      criteria: r.criteria.map((crit, j) => ({ ...this.critView(crit, j), reactIndex: i }))
+    }));
+    // The fortification runes' own DCs, shown under the generic field so the
+    // DC the engine will use (the lowest) can be read at a glance.
+    const fortRunes = isArmor
+      ? d.runes.property
+          .map((slug, i) => ({ slug, i }))
+          .filter(({ slug }) => slug in FORT_RUNE_DC)
+          .map(({ slug, i }) => ({
+            text: game.i18n.format("SWE.ArmFortRune", { rune: labelFor(armorRuneRecord(), slug), dc: FORT_RUNE_DC[slug] }),
+            off: abpNoRunes || d.runeOff.includes(slug) || i >= slots
+          }))
+      : [];
     const derivedGp = Number(this.item.system?.price?.value?.gp ?? 0);
     const baseGp = Number(this.item._source.system?.price?.value?.gp ?? 0);
     const priceLocked = basePriceIgnored(this.item);
@@ -811,7 +1075,21 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
         value: f,
         label: i18n(`ArmFilter_${f}`)
       })),
-      dies: cfgDies,
+      tempModeOptions: tempModeOptions(),
+      reactsIndexed,
+      fortRunes,
+      reactTriggerOptions: REACT_TRIGGERS.filter((t) => !isArmor || !SHIELD_TRIGGERS.includes(t)).map((t) => ({
+        value: t,
+        label: i18n(`ArmReactTrigger_${t}`)
+      })),
+      reactAttackOptions: REACT_ATTACKS.map((a) => ({ value: a, label: i18n(`ArmReactAttack_${a}`) })),
+      reactEffectOptions: REACT_EFFECTS.map((e) => ({ value: e, label: i18n(`ArmReactEffect_${e}`) })),
+      reactToOptions: ["attacker", "wearer"].map((t) => ({ value: t, label: i18n(`ArmReactTo_${t}`) })),
+      reactFreqOptions: REACT_FREQS.map((f) => ({ value: f, label: i18n(`ArmReactFreq_${f}`) })),
+      reactSaveOptions: REACT_SAVES.map((s) => ({ value: s, label: labelFor(cfg.saves, s) })),
+      damageTypeOptions: locRecord(cfg.damageTypes),
+      conditionOptions: locRecord(cfg.conditionTypes).filter((o) => !HITCOND_EXCLUDED.has(o.value)),
+      dies: DIE_SIZES,
       propCount: isArmor ? d.runes.property.length : 0,
       overLimit: isArmor && d.runes.property.length > slots,
       abp: isArmor && abpFor(this.item.actor),
@@ -831,14 +1109,34 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
     };
   }
 
+  // One requirement as the conditional and reaction cards both show it.
+  critView(crit, j) {
+    const resolved = condLabel(this._condChoices, crit);
+    return {
+      ...crit,
+      index: j,
+      first: j === 0,
+      showMin: ACOND_STATE.includes(crit.filter) && (!crit.slug || isValuedCondition(crit.slug)),
+      minVal: Number(crit.min) > 0 ? crit.min : "",
+      display: resolved ?? crit.slug,
+      dl: `swe-dl-${this.id}-${crit.filter}`,
+      unknown: !!crit.slug && !resolved
+    };
+  }
+
+  // The card list a requirement field belongs to: "aconds" or "reacts".
+  cardsOf(list) {
+    return list === "reacts" ? this.data.reacts : this.data.conds;
+  }
+
   _onRender(context, options) {
     super._onRender?.(context, options);
     guardClicks(this);
     const form = this.element;
     const body = form.querySelector(".swe-body");
     if (body && this._sweScrollTop) body.scrollTop = this._sweScrollTop;
-    const isCritFilter = (el) => /^aconds\.\d+\.criteria\.\d+\.filter$/.test(el.name ?? "");
-    const isCritTarget = (el) => /^aconds\.\d+\.criteria\.\d+\.slugInput$/.test(el.name ?? "");
+    const isCritFilter = (el) => /^(?:aconds|reacts)\.\d+\.criteria\.\d+\.filter$/.test(el.name ?? "");
+    const isCritTarget = (el) => /^(?:aconds|reacts)\.\d+\.criteria\.\d+\.slugInput$/.test(el.name ?? "");
     for (const el of form.querySelectorAll("select, input[type=checkbox], input[type=number]")) {
       if (el.name === "runeToAdd" || el.name === "traitToAdd") continue;
       if (isCritFilter(el)) continue;
@@ -871,10 +1169,10 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
     for (const el of form.querySelectorAll("select")) {
       if (!isCritFilter(el)) continue;
       el.addEventListener("change", () => {
-        const [, ci, , j] = el.name.split(".");
-        const prev = this.data.conds[Number(ci)]?.criteria?.[Number(j)]?.filter;
+        const [list, ci, , j] = el.name.split(".");
+        const prev = this.cardsOf(list)[Number(ci)]?.criteria?.[Number(j)]?.filter;
         this.syncFromForm();
-        const crit = this.data.conds[Number(ci)]?.criteria?.[Number(j)];
+        const crit = this.cardsOf(list)[Number(ci)]?.criteria?.[Number(j)];
         if (crit) {
           // Wearer and attacker condition criteria share one list.
           const keep = ACOND_STATE.includes(prev) && ACOND_STATE.includes(el.value);
@@ -936,29 +1234,33 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
         .sort(byIndex)
         .map((k) => normalizeMod({ ...(d.mods[Number(k)] ?? {}), ...o.mods[k] }));
     }
+    // Requirement rows hand back the label typed in their search; it is
+    // resolved to a slug here, and a card whose rows are not in the form keeps
+    // the ones it had.
+    const critsFrom = (raw, prev) =>
+      raw
+        ? Object.keys(raw)
+            .sort(byIndex)
+            .map((ck) => {
+              const e = raw[ck] ?? {};
+              const slug = e.slugInput !== undefined ? resolveCritInput(this._condChoices, e.filter, e.slugInput) : e.slug;
+              return { ...(prev?.[Number(ck)] ?? {}), filter: e.filter, slug, min: e.min };
+            })
+        : prev ?? [];
     if (o.aconds) {
       d.conds = Object.keys(o.aconds)
         .sort(byIndex)
         .map((k) => {
           const prev = d.conds[Number(k)] ?? {};
           const raw = o.aconds[k] ?? {};
-          const crits = raw.criteria
-            ? Object.keys(raw.criteria)
-                .sort(byIndex)
-                .map((ck) => {
-                  const e = raw.criteria[ck] ?? {};
-                  const slug =
-                    e.slugInput !== undefined ? resolveCritInput(this._condChoices, e.filter, e.slugInput) : e.slug;
-                  return { ...(prev.criteria?.[Number(ck)] ?? {}), filter: e.filter, slug, min: e.min };
-                })
-            : prev.criteria ?? [];
           const c = normalizeACond({
             ...prev,
             ...raw,
-            criteria: crits,
+            criteria: critsFrom(raw.criteria, prev.criteria),
             mod: { ...(prev.mod ?? {}), ...(raw.mod ?? {}) },
             def: { ...(prev.def ?? {}), ...(raw.def ?? {}) },
-            heal: { ...(prev.heal ?? {}), ...(raw.heal ?? {}) }
+            heal: { ...(prev.heal ?? {}), ...(raw.heal ?? {}) },
+            temp: tempFromForm(prev.temp, raw.temp)
           });
           const valid = iwrOptions(c.def.kind).map((x) => x.value);
           if (!valid.includes(c.def.type)) c.def.type = valid.includes("fire") ? "fire" : (valid[0] ?? "");
@@ -966,6 +1268,29 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
           return c;
         });
     }
+    if (o.reacts) {
+      // Payloads merge with the previous card, as in the conditionals: the
+      // inputs of an effect that is not shown are not in the form.
+      d.reacts = Object.keys(o.reacts)
+        .sort(byIndex)
+        .map((k) => {
+          const prev = d.reacts[Number(k)] ?? {};
+          const raw = o.reacts[k] ?? {};
+          return normalizeReact(
+            {
+              ...prev,
+              ...raw,
+              criteria: critsFrom(raw.criteria, prev.criteria),
+              damage: { ...(prev.damage ?? {}), ...(raw.damage ?? {}) },
+              cond: { ...(prev.cond ?? {}), ...(raw.cond ?? {}) },
+              temp: tempFromForm(prev.temp, raw.temp),
+              save: { ...(prev.save ?? {}), ...(raw.save ?? {}) }
+            },
+            d.kind
+          );
+        });
+    }
+    if (o.fort && d.kind === "armor") d.fort = normalizeFort({ ...d.fort, ...o.fort });
     if (o.runeOn && d.kind === "armor") {
       d.runeOff = Object.entries(o.runeOn)
         .filter(([, v]) => v === false)
@@ -1005,6 +1330,54 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
     if (cond.criteria.length <= 1) this.data.conds = this.data.conds.filter((x, i) => i !== ci);
     else cond.criteria = cond.criteria.filter((x, j) => j !== idx);
     this.render();
+  }
+
+  // The id is minted once, when the card is added, and then travels with it
+  // (a hidden field): the engine's frequency stamps are keyed by it.
+  static actAddReact() {
+    this.syncFromForm();
+    this.data.reacts.push(
+      normalizeReact(
+        {
+          id: foundry.utils.randomID(8),
+          trigger: "hit",
+          attack: "melee",
+          effect: "damage",
+          damage: { value: 1, die: "d6", bonus: 0, type: "piercing", amount: "roll" },
+          cond: { slug: "frightened", value: 1 },
+          temp: { value: 5, die: "", scale: "fixed" },
+          save: { type: "", dc: 15, mode: "fixed", out: "half" },
+          freq: "always"
+        },
+        this.data.kind
+      )
+    );
+    renderSoon(this);
+  }
+
+  static actRemoveReact(event, target) {
+    this.syncFromForm();
+    const idx = Number(target?.dataset?.index);
+    this.data.reacts = this.data.reacts.filter((x, i) => i !== idx);
+    renderSoon(this);
+  }
+
+  static actAddRCrit(event, target) {
+    this.syncFromForm();
+    const ri = Number(target?.dataset?.react);
+    this.data.reacts[ri]?.criteria.push(normalizeACrit({ filter: "ancestry", slug: "" }));
+    renderSoon(this);
+  }
+
+  // Unlike a conditional, a reaction with no requirements is meaningful (it
+  // always fires), so removing the last one keeps the card.
+  static actRemoveRCrit(event, target) {
+    this.syncFromForm();
+    const ri = Number(target?.dataset?.react);
+    const idx = Number(target?.dataset?.index);
+    const react = this.data.reacts[ri];
+    if (react) react.criteria = react.criteria.filter((x, j) => j !== idx);
+    renderSoon(this);
   }
 
   static actTab(event, target) {
@@ -1122,6 +1495,22 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
       .filter((c) => c.criteria.length);
     if (conds.length < d.conds.length) ui.notifications.warn(`${i18n("CondNoTarget")} (${d.conds.length - conds.length})`);
     d.conds = conds;
+    // A reaction keeps its card when an empty requirement is dropped, so the
+    // warning says the card now fires with fewer requirements than shown.
+    let droppedReqs = 0;
+    const seenIds = new Set();
+    const reacts = d.reacts.map((r) => {
+      const criteria = r.criteria.filter((k) => k.slug);
+      droppedReqs += r.criteria.length - criteria.length;
+      // Two cards sharing an id would share one frequency stamp.
+      let id = r.id;
+      while (!id || seenIds.has(id)) id = foundry.utils.randomID(8);
+      seenIds.add(id);
+      return { ...r, id, criteria };
+    });
+    if (droppedReqs) ui.notifications.warn(`${i18n("ArmReactReqDropped")} (${droppedReqs})`);
+    d.reacts = reacts;
+    const fort = normalizeFort(d.kind === "armor" ? d.fort : null);
     const update = {
       // The displayed name can be generated ("+1 Breastplate") or mystified;
       // an emptied field falls back to the stored one, not the displayed one.
@@ -1131,7 +1520,15 @@ class SimpleArmorEditor extends foundry.applications.api.HandlebarsApplicationMi
       "system.speedPenalty": d.speedPenalty,
       "system.acBonus": d.acBonus,
       "system.rules": [...keep, ...withToggleState(defenseRules(d, this.item.id), toggles)],
-      [`flags.${MODULE_ID}.${DEF_FLAG}`]: { defenses: d.defenses, mods: d.mods, conds: d.conds, runeOff: d.runeOff, toggles }
+      [`flags.${MODULE_ID}.${DEF_FLAG}`]: {
+        defenses: d.defenses,
+        mods: d.mods,
+        conds: d.conds,
+        reacts: d.reacts,
+        fort,
+        runeOff: d.runeOff,
+        toggles
+      }
     };
     if (d.kind === "armor") {
       Object.assign(update, {
@@ -1231,8 +1628,16 @@ const EXTERNAL_FIELDS = [
   ["system.hardness", ["hardness"]],
   ["system.hp.max", ["hpMax"]],
   ["system.runes", ["runes", "reinforcing"]],
-  [`flags.${MODULE_ID}.${DEF_FLAG}`, ["defenses", "mods", "conds", "runeOff"]]
+  [`flags.${MODULE_ID}.${DEF_FLAG}`, ["defenses", "mods", "conds", "reacts", "fort", "runeOff"]]
 ];
+
+// The reaction engine's frequency stamps, in any of the forms an update can
+// carry them (a value, a deletion of one stamp, or of the whole flag).
+const USES_PATH = `flags.${MODULE_ID}.${USES_FLAG}`;
+const USES_WHOLE = [USES_PATH, `flags.${MODULE_ID}.-=${USES_FLAG}`, `flags.${MODULE_ID}.==${USES_FLAG}`];
+function isUsesKey(k) {
+  return USES_WHOLE.includes(k) || k.startsWith(`${USES_PATH}.`);
+}
 
 Hooks.on("updateItem", (doc, changes) => {
   const app = SimpleArmorEditor.instances.get(doc.uuid ?? doc.id);
@@ -1242,8 +1647,9 @@ Hooks.on("updateItem", (doc, changes) => {
   );
   // A player flipping a rune toggle (Energy Adaptive's type, Winged) rewrites
   // system.rules, which the editor never shows; re-rendering for it threw
-  // away whatever the GM had typed and not saved yet.
-  if (keys.every((k) => k === "system.rules" || k.startsWith("system.rules."))) return;
+  // away whatever the GM had typed and not saved yet. The engine stamping a
+  // reaction's use mid-combat is just as invisible to the editor.
+  if (keys.every((k) => k === "system.rules" || k.startsWith("system.rules.") || isUsesKey(k))) return;
   app.syncFromForm();
   const touched = (p) => keys.some((k) => k === p || k.startsWith(`${p}.`) || p.startsWith(`${k}.`));
   const fresh = SimpleArmorEditor.extract(doc);
@@ -1270,7 +1676,7 @@ async function runArmorHealing(actor) {
   const entries = [];
   for (const item of actor.items ?? []) {
     if (item.type !== "armor" && item.type !== "shield") continue;
-    if (!item.isEquipped || item.isInvested === false) continue;
+    if (!isGearActive(item)) continue;
     for (const c of readDefense(item).conds) {
       if (c.effect !== "healTurn") continue;
       if (c.criteria.every((k) => armorMatchesCrit(actor, k))) entries.push({ item, c });
@@ -1292,3 +1698,16 @@ Hooks.on("pf2e.startTurn", (combatant) => {
   const actor = combatant?.actor;
   if (actor) runArmorHealing(actor);
 });
+
+// Shared with the reaction engine (scripts/armor-engine.js), which reads the
+// cards this editor writes instead of parsing the flag on its own.
+export {
+  DEF_FLAG,
+  USES_FLAG,
+  FORT_RUNE_DC,
+  readDefense,
+  normalizeReact,
+  armorMatchesCrit,
+  isGearActive,
+  activeRunesOf
+};

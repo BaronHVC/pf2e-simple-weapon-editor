@@ -21,6 +21,7 @@
     <a data-action="sweTab" data-tab="runes" class="{{#if (sweEq activeTab 'runes')}}active{{/if}}"><i class="fa-solid fa-wand-magic-sparkles"></i> {{localize "SWE.Runes"}}</a>
     <a data-action="sweTab" data-tab="traits" class="{{#if (sweEq activeTab 'traits')}}active{{/if}}"><i class="fa-solid fa-tags"></i> {{localize "SWE.Traits"}}</a>
     <a data-action="sweTab" data-tab="conds" class="{{#if (sweEq activeTab 'conds')}}active{{/if}}"><i class="fa-solid fa-users"></i> {{localize "SWE.TabConds"}}</a>
+    <a data-action="sweTab" data-tab="reacts" class="{{#if (sweEq activeTab 'reacts')}}active{{/if}}"><i class="fa-solid fa-bolt"></i> {{localize "SWE.ArmTabReacts"}}</a>
   </nav>
 
   <fieldset class="swe-section swe-tabpanel{{#if (sweEq activeTab 'defense')}} active{{/if}}">
@@ -362,6 +363,18 @@
           </select>
         </span>
         {{/if}}
+        {{#if this.isTemp}}
+        <span class="swe-card-amount" title="{{localize 'SWE.ArmTempTurnHint'}}">
+          {{#if this.tempShowValue}}
+          <input type="number" name="aconds.{{this.index}}.temp.value" value="{{this.temp.value}}" min="1" max="99" step="1" class="swe-narrow" />
+          {{/if}}
+          <select name="aconds.{{this.index}}.temp.mode" class="swe-temp-mode">
+            {{#each ../tempModeOptions}}
+            <option value="{{this.value}}" {{#if (sweEq this.value ../tempMode)}}selected{{/if}}>{{this.label}}</option>
+            {{/each}}
+          </select>
+        </span>
+        {{/if}}
         <a class="swe-rowdel" data-action="sweRemoveACond" data-index="{{this.index}}" title="{{localize 'SWE.RemoveCond'}}"><i class="fa-solid fa-trash"></i></a>
       </div>
 
@@ -400,6 +413,189 @@
     <div class="swe-row">
       <button type="button" data-action="sweAddACond"><i class="fa-solid fa-plus"></i> {{localize "SWE.AddCond"}}</button>
     </div>
+  </fieldset>
+
+  <fieldset class="swe-section swe-tabpanel{{#if (sweEq activeTab 'reacts')}} active{{/if}}">
+    <legend><i class="fa-solid fa-bolt"></i> {{localize "SWE.ArmTabReacts"}}</legend>
+    <p class="swe-hint">{{localize "SWE.ArmReactHint"}}</p>
+
+    {{#if isArmor}}
+    <div class="swe-block swe-block-fort">
+      <div class="swe-block-head">
+        <span class="swe-block-title swe-title-fort"><i class="fa-solid fa-chess-rook"></i> {{localize "SWE.ArmFortHead"}}</span>
+      </div>
+      <div class="swe-react-row">
+        <span class="swe-react-label">{{localize "SWE.ArmFortDc"}}</span>
+        <input type="number" name="fort.dc" value="{{data.fort.dc}}" min="0" max="20" step="1" class="swe-narrow" title="{{localize 'SWE.ArmFortDcHint'}}" />
+        <span class="swe-react-note">{{localize "SWE.ArmFortNone"}}</span>
+      </div>
+      {{#each fortRunes}}
+      <p class="swe-react-fortrune{{#if this.off}} swe-dim{{/if}}"><i class="fa-solid fa-wand-magic-sparkles"></i> {{this.text}}{{#if this.off}} ({{localize "SWE.ArmRuneAuto_off"}}){{/if}}</p>
+      {{/each}}
+      <p class="swe-hint swe-react-blockhint"><i class="fa-solid fa-circle-info"></i> {{localize "SWE.ArmFortHint"}}</p>
+    </div>
+    {{/if}}
+
+    {{#each reactsIndexed}}
+    <div class="swe-card swe-kind-{{this.kind}}">
+      <input type="hidden" name="reacts.{{this.index}}.id" value="{{this.id}}" />
+      <div class="swe-card-head">
+        <span class="swe-fx-icon"><i class="fa-solid {{this.icon}}"></i></span>
+        <select name="reacts.{{this.index}}.trigger" class="swe-fx-select" title="{{localize 'SWE.ArmReactTriggerHint'}}">
+          {{#each ../reactTriggerOptions}}
+          <option value="{{this.value}}" {{#if (sweEq this.value ../trigger)}}selected{{/if}}>{{this.label}}</option>
+          {{/each}}
+        </select>
+        <select name="reacts.{{this.index}}.attack" title="{{localize 'SWE.ArmReactAttackHint'}}">
+          {{#each ../reactAttackOptions}}
+          <option value="{{this.value}}" {{#if (sweEq this.value ../attack)}}selected{{/if}}>{{this.label}}</option>
+          {{/each}}
+        </select>
+        {{#if ../isShield}}
+        <label class="swe-pickbox" title="{{localize 'SWE.ArmRaisedHint'}}">
+          <input type="checkbox" name="reacts.{{this.index}}.raised" {{#if this.raised}}checked{{/if}} />
+          {{localize "SWE.ArmRaised"}}
+        </label>
+        {{/if}}
+        <a class="swe-rowdel" data-action="sweRemoveReact" data-index="{{this.index}}" title="{{localize 'SWE.ArmRemoveReact'}}"><i class="fa-solid fa-trash"></i></a>
+      </div>
+
+      <div class="swe-card-body">
+        <div class="swe-react-row">
+          <span class="swe-react-label">{{localize "SWE.ArmReactEffect"}}</span>
+          <select name="reacts.{{this.index}}.effect" class="swe-fx-select">
+            {{#each ../reactEffectOptions}}
+            <option value="{{this.value}}" {{#if (sweEq this.value ../effect)}}selected{{/if}}>{{this.label}}</option>
+            {{/each}}
+          </select>
+          {{#if this.toLocked}}
+          <span class="swe-react-to">{{this.toLabel}}</span>
+          {{else}}
+          <select name="reacts.{{this.index}}.to">
+            {{#each ../reactToOptions}}
+            <option value="{{this.value}}" {{#if (sweEq this.value ../to)}}selected{{/if}}>{{this.label}}</option>
+            {{/each}}
+          </select>
+          {{/if}}
+
+          {{#if this.isDamage}}
+          {{#if ../isShield}}
+          <select name="reacts.{{this.index}}.damage.amount" title="{{localize 'SWE.ArmReactAmountHint'}}">
+            <option value="roll" {{#unless (sweEq this.damage.amount 'hardness')}}selected{{/unless}}>{{localize "SWE.ArmReactAmount_roll"}}</option>
+            <option value="hardness" {{#if (sweEq this.damage.amount 'hardness')}}selected{{/if}}>{{localize "SWE.ArmReactAmount_hardness"}}</option>
+          </select>
+          {{/if}}
+          {{#if this.dmgRolled}}
+          <input type="number" name="reacts.{{this.index}}.damage.value" value="{{this.damage.value}}" min="1" max="20" step="1" class="swe-narrow" />
+          <select name="reacts.{{this.index}}.damage.die" class="swe-react-die">
+            <option value="" {{#unless this.damage.die}}selected{{/unless}}>{{localize "SWE.Fixed"}}</option>
+            {{#each ../dies}}
+            <option value="{{this}}" {{#if (sweEq this ../damage.die)}}selected{{/if}}>{{this}}</option>
+            {{/each}}
+          </select>
+          <span class="swe-react-plus">+</span>
+          <input type="number" name="reacts.{{this.index}}.damage.bonus" value="{{this.damage.bonus}}" min="0" max="99" step="1" class="swe-narrow" title="{{localize 'SWE.ArmReactBonus'}}" />
+          {{/if}}
+          <select name="reacts.{{this.index}}.damage.type">
+            {{#each ../damageTypeOptions}}
+            <option value="{{this.value}}" {{#if (sweEq this.value ../damage.type)}}selected{{/if}}>{{this.label}}</option>
+            {{/each}}
+          </select>
+          <label class="swe-pickbox" title="{{localize 'SWE.ArmReactPersHint'}}">
+            <input type="checkbox" name="reacts.{{this.index}}.damage.persistent" {{#if this.damage.persistent}}checked{{/if}} />
+            {{localize "SWE.PersistentShort"}}
+          </label>
+          {{/if}}
+
+          {{#if this.isCond}}
+          <select name="reacts.{{this.index}}.cond.slug">
+            {{#each ../conditionOptions}}
+            <option value="{{this.value}}" {{#if (sweEq this.value ../cond.slug)}}selected{{/if}}>{{this.label}}</option>
+            {{/each}}
+          </select>
+          {{#if this.condValued}}
+          <input type="number" name="reacts.{{this.index}}.cond.value" value="{{this.cond.value}}" min="1" max="99" step="1" class="swe-narrow" title="{{localize 'SWE.HitCondValue'}}" />
+          {{/if}}
+          {{/if}}
+
+          {{#if this.isTemp}}
+          {{#if this.tempShowValue}}
+          <input type="number" name="reacts.{{this.index}}.temp.value" value="{{this.temp.value}}" min="1" max="99" step="1" class="swe-narrow" />
+          {{/if}}
+          <select name="reacts.{{this.index}}.temp.mode" class="swe-temp-mode" title="{{localize 'SWE.ArmReactTempHint'}}">
+            {{#each ../tempModeOptions}}
+            <option value="{{this.value}}" {{#if (sweEq this.value ../tempMode)}}selected{{/if}}>{{this.label}}</option>
+            {{/each}}
+          </select>
+          {{/if}}
+        </div>
+
+        {{#if this.hasSave}}
+        <div class="swe-react-row">
+          <span class="swe-react-label">{{localize "SWE.ArmReactSave"}}</span>
+          <select name="reacts.{{this.index}}.save.type" title="{{localize 'SWE.ArmReactSaveHint'}}">
+            <option value="" {{#unless this.save.type}}selected{{/unless}}>{{localize "SWE.ArmReactNoSave"}}</option>
+            {{#each ../reactSaveOptions}}
+            <option value="{{this.value}}" {{#if (sweEq this.value ../save.type)}}selected{{/if}}>{{this.label}}</option>
+            {{/each}}
+          </select>
+          {{#if this.save.type}}
+          <select name="reacts.{{this.index}}.save.{{this.saveOutField}}">
+            {{#each this.saveOutOptions}}
+            <option value="{{this.value}}" {{#if (sweEq this.value ../save.out)}}selected{{/if}}>{{this.label}}</option>
+            {{/each}}
+          </select>
+          <select name="reacts.{{this.index}}.save.mode" title="{{localize 'SWE.ArmDcAutoHint'}}">
+            <option value="fixed" {{#unless this.saveAuto}}selected{{/unless}}>{{localize "SWE.DcFixed"}}</option>
+            <option value="auto" {{#if this.saveAuto}}selected{{/if}}>{{localize "SWE.ArmDcAuto"}}</option>
+          </select>
+          <span class="swe-react-note">{{#if this.saveAuto}}{{localize "SWE.ArmDcFallback"}}{{else}}{{localize "SWE.SaveDC"}}{{/if}}</span>
+          <input type="number" name="reacts.{{this.index}}.save.dc" value="{{this.save.dc}}" min="1" max="60" step="1" class="swe-narrow" title="{{#if this.saveAuto}}{{localize 'SWE.ArmDcAutoHint'}}{{else}}{{localize 'SWE.SaveDC'}}{{/if}}" />
+          {{/if}}
+        </div>
+        {{/if}}
+
+        <div class="swe-react-row">
+          <span class="swe-react-label">{{localize "SWE.ArmReactFreq"}}</span>
+          <select name="reacts.{{this.index}}.freq" title="{{localize 'SWE.ArmReactFreqHint'}}">
+            {{#each ../reactFreqOptions}}
+            <option value="{{this.value}}" {{#if (sweEq this.value ../freq)}}selected{{/if}}>{{this.label}}</option>
+            {{/each}}
+          </select>
+          <input type="text" name="reacts.{{this.index}}.src" value="{{this.src}}" placeholder="{{localize 'SWE.ArmReactSrcPh'}}" class="swe-src" />
+        </div>
+
+        <span class="swe-card-when">{{localize "SWE.ArmReactReqs"}}</span>
+        {{#unless this.criteria.length}}
+        <p class="swe-react-always">{{localize "SWE.ArmReactNoReqs"}}</p>
+        {{/unless}}
+        {{#each this.criteria}}
+        <div class="swe-cond-when">
+          <span class="swe-tag">{{#if this.first}}{{localize "SWE.CondIf"}}{{else}}{{localize "SWE.CondAnd"}}{{/if}}</span>
+          <select name="reacts.{{this.reactIndex}}.criteria.{{this.index}}.filter">
+            {{#each ../../acondFilterOptions}}
+            <option value="{{this.value}}" {{#if (sweEq this.value ../filter)}}selected{{/if}}>{{this.label}}</option>
+            {{/each}}
+          </select>
+          <input type="text" name="reacts.{{this.reactIndex}}.criteria.{{this.index}}.slugInput" value="{{this.display}}" list="{{this.dl}}" class="swe-cond-target" placeholder="{{localize 'SWE.CondSearchPh'}}" autocomplete="off" spellcheck="false" />
+          {{#if this.showMin}}
+          <input type="number" name="reacts.{{this.reactIndex}}.criteria.{{this.index}}.min" value="{{this.minVal}}" min="0" max="20" step="1" class="swe-narrow swe-min" placeholder="{{localize 'SWE.MinPh'}}" title="{{localize 'SWE.MinHint'}}" />
+          {{/if}}
+          <a data-action="sweRemoveRCrit" data-react="{{this.reactIndex}}" data-index="{{this.index}}" title="{{localize 'SWE.Remove'}}"><i class="fa-solid fa-xmark"></i></a>
+        </div>
+        {{#if this.unknown}}
+        <p class="swe-warning"><i class="fa-solid fa-triangle-exclamation"></i> {{localize "SWE.CondUnknown"}}: <code>{{this.slug}}</code></p>
+        {{/if}}
+        {{/each}}
+        <a class="swe-ghostchip" data-action="sweAddRCrit" data-react="{{this.index}}"><i class="fa-solid fa-plus"></i> {{#if this.criteria.length}}{{localize "SWE.AddCriterion"}}{{else}}{{localize "SWE.ArmReactAddReq"}}{{/if}}</a>
+      </div>
+    </div>
+    {{/each}}
+
+    <div class="swe-row">
+      <button type="button" data-action="sweAddReact"><i class="fa-solid fa-plus"></i> {{localize "SWE.ArmAddReact"}}</button>
+    </div>
+    <p class="swe-hint"><i class="fa-solid fa-circle-info"></i> {{localize "SWE.ArmReactFooter"}}</p>
   </fieldset>
 
   {{#each datalists}}

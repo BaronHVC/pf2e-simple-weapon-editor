@@ -806,7 +806,6 @@
 .swe-editor .swe-rune-auto-full { color: #5fbe7e; }
 .swe-editor .swe-rune-auto-partial { color: #d8b95e; }
 .swe-editor .swe-rune-auto-manual { color: #9aa0aa; }
-.swe-editor .swe-rune-auto-engine { color: #7fb0d4; }
 .swe-editor .swe-rune-auto-off { color: #9aa0aa; border-style: dashed; }
 .swe-editor .swe-rune-auto-abp { color: #d08a5a; border-style: dashed; }
 .swe-editor .swe-rune-summary.swe-dim { opacity: 0.45; }
@@ -815,3 +814,85 @@
   opacity: 0.75;
   padding: 0 8px 6px;
 }
+
+/* Temporary HP: blue-violet, so it never reads as the green of healing. */
+.swe-editor .swe-kind-temp .swe-card-head { background: rgba(140, 122, 230, 0.10); }
+.swe-editor .swe-kind-temp .swe-fx-icon {
+  color: #9d8cf0;
+  background: rgba(140, 122, 230, 0.16);
+  border: 1px solid rgba(140, 122, 230, 0.5);
+}
+/* "= half level" does not fit the 70px a die select gets. */
+.swe-editor .swe-card-amount select.swe-temp-mode { max-width: 130px; }
+
+/* Reacciones (armaduras y escudos) */
+.swe-editor .swe-kind-rcond .swe-card-head { background: rgba(199, 146, 234, 0.10); }
+.swe-editor .swe-kind-rcond .swe-fx-icon {
+  color: #c792ea;
+  background: rgba(199, 146, 234, 0.16);
+  border: 1px solid rgba(199, 146, 234, 0.5);
+}
+.swe-editor .swe-react-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.swe-editor .swe-react-row > select {
+  width: auto !important;
+  flex: 0 1 auto;
+  min-width: 60px;
+  max-width: 175px;
+}
+.swe-editor .swe-react-row > select.swe-react-die { max-width: 80px; }
+.swe-editor .swe-react-row > input[type="number"] {
+  width: 54px !important;
+  flex: 0 0 54px;
+}
+.swe-editor .swe-react-row > input[type="text"] {
+  width: auto !important;
+  flex: 1 1 140px;
+  min-width: 90px;
+}
+.swe-editor .swe-react-label {
+  font-size: 0.68em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.55;
+  min-width: 72px;
+  flex: 0 0 auto;
+}
+.swe-editor .swe-react-to {
+  font-size: 0.85em;
+  padding: 1px 9px;
+  border: 1px solid #5a5a64;
+  border-radius: 10px;
+  opacity: 0.85;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.swe-editor .swe-react-plus,
+.swe-editor .swe-react-note {
+  font-size: 0.85em;
+  opacity: 0.7;
+  flex: 0 0 auto;
+}
+.swe-editor .swe-react-always {
+  margin: 0;
+  font-size: 0.85em;
+  font-style: italic;
+  opacity: 0.65;
+}
+.swe-editor .swe-block-fort {
+  border-color: rgba(160, 174, 192, 0.45);
+  background: rgba(160, 174, 192, 0.05);
+}
+.swe-editor .swe-title-fort { color: #a0aec0; }
+.swe-editor .swe-react-fortrune {
+  margin: 0;
+  font-size: 0.85em;
+}
+.swe-editor .swe-react-fortrune.swe-dim { opacity: 0.45; }
+.swe-editor .swe-react-fortrune i { opacity: 0.6; margin-right: 4px; }
+.swe-editor .swe-block-fort .swe-react-blockhint { margin: 0; }

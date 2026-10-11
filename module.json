@@ -26,7 +26,8 @@
   "esmodules": [
     "scripts/main.js",
     "scripts/armor-runes.js",
-    "scripts/armor.js"
+    "scripts/armor.js",
+    "scripts/armor-engine.js"
   ],
   "styles": [
     "styles/editor.css"
